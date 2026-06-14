@@ -38,10 +38,17 @@
 </div>
 
 <script>
+    // --- 1. 檢查 Canvas 是否成功取得與建立 ---
     const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d', { alpha: false }); 
+    // 修復: 移除 { alpha: false } 避免在某些 WebView/行動裝置瀏覽器造成渲染層全黑失效
+    const ctx = canvas ? canvas.getContext('2d') : null; 
 
-    // 加入 roundRect Polyfill 以防舊版瀏覽器不支援而導致無畫面
+    if (canvas && ctx) {
+        console.log("Canvas初始化成功", canvas.width, canvas.height);
+    } else {
+        console.error("Canvas初始化失敗！找不到元件或無法建立 Context。");
+    }
+
     if (!CanvasRenderingContext2D.prototype.roundRect) {
         CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
             r = r || 0;
@@ -56,7 +63,6 @@
 
     const FONT_FAMILY = '"Kaiti", "標楷體", "Times New Roman", serif';
 
-    // 自適應滿版系統
     let dpr = window.devicePixelRatio || 1;
     let cw = window.innerWidth;
     let ch = window.innerHeight;
@@ -64,21 +70,25 @@
     function resize() {
         cw = window.innerWidth;
         ch = window.innerHeight;
-        canvas.width = cw * dpr;
-        canvas.height = ch * dpr;
+        if(canvas) {
+            canvas.width = cw * dpr;
+            canvas.height = ch * dpr;
+        }
     }
     window.addEventListener('resize', resize);
     resize();
 
-    // 遊戲狀態機 (完整流程串接) - 新增 LOADING 狀態
     const STATES = { START: 0, DAY_TRANSITION: 1, FREE_ACTION: 2, ACTION_RESULT: 3, RANDOM_EVENT: 4, HIDDEN_EVENT: 5, INTERACT_CHOICE: 6, STORY: 7, QUESTION: 8, FEEDBACK: 9, END: 10, LOADING: 11 };
-    let currentState = STATES.LOADING; // 預設狀態改為載入中
+    
+    // --- 4. 檢查目前 currentState 初始值 ---
+    let currentState = STATES.LOADING; 
+    console.log("目前初始狀態設定為:", currentState, "(預期為 11: LOADING)");
+
     let currentDay = 1;
     let currentStage = null;
     let currentStoryLine = 0;
     let selectedOptionFeedback = "";
     
-    // 每日事件旗標
     let dailyFlags = { crisisDone: false, randomDone: false, hiddenDone: false };
 
     let mouse = { x: cw/2, y: ch/2, targetX: cw/2, targetY: ch/2, isDown: false };
@@ -90,14 +100,13 @@
     let bloomColor = '255,255,255';
     let globalAlpha = 1; 
     
-    // 玩家屬性系統 (新增隱藏路線機制)
     let player = { 
-        knowledge: 50,    // 智慧
-        health: 80,       // 健康(體力)
-        reputation: 50,   // 聲望
-        bond: 50,         // 孩子羈絆
-        ap: 3,            // 每日行動力
-        routes: { virtue: 0, power: 0, medical: 0, family: 0 }, // 隱藏路線(賢德/權謀/醫術/親情)
+        knowledge: 50,    
+        health: 80,       
+        reputation: 50,   
+        bond: 50,         
+        ap: 3,            
+        routes: { virtue: 0, power: 0, medical: 0, family: 0 }, 
         affections: {
             maid: { name: "丫鬟 春桃", current: 20, target: 20, max: 100, color: "#e86f88", status: "陌生" },
             chef: { name: "膳房 總管", current: 20, target: 20, max: 100, color: "#d29c72", status: "陌生" },
@@ -110,7 +119,6 @@
     let currentHiddenEvent = null;
     let currentEnding = null;
 
-    // --- 劇情資料 ---
     const daysData = [
         { day: "產後第一天", weather: "sunny", location: "華麗正房", event: "初為人母，您抱著剛出生的孩兒，心中充滿溫暖。大宋的陽光和煦，是個好兆頭。" },
         { day: "產後第二天", weather: "cloudy", location: "侯府花園", event: "天色微陰。小少爺的哭聲劃破了寧靜，新手母親與下人們共同努力照護。" },
@@ -121,7 +129,6 @@
         { day: "產後第七天", weather: "sunny", location: "侯府花園", event: "轉眼已至第七日，您在大家的陪伴下，即將迎來最終的考驗與蛻變。" }
     ];
 
-    // 替換陣列解構，避免不相容的 Syntax Error
     function shuffle(array) {
         let currentIndex = array.length, randomIndex, temp;
         while (currentIndex !== 0) {
@@ -134,8 +141,6 @@
         return array;
     }
 
-    // 保留原本的題庫做為沒有網路/找不到 JSON 時的備用資料 (Fallback)
-    // 確保結構與 JSON 格式完全一致，包含 "character" 欄位
     const fallbackQuestions = [
          {
             "id": "fb_1", "category": "產後調養", "character": "丫鬟 春桃",
@@ -190,7 +195,6 @@
         let doctorPool = pool.filter(q => q.character && (q.character.includes('太醫') || q.character.includes('張大人')));
         let medicPool = pool.filter(q => q.character && (q.character.includes('醫女') || q.character.includes('蘇氏')));
 
-        // 防呆分配：移除展開運算子 (...) 改用 .slice()
         if(maidPool.length === 0 && chefPool.length === 0 && doctorPool.length === 0 && medicPool.length === 0) {
             let shuffled = shuffle(pool.slice());
             let chunk = Math.max(1, Math.floor(shuffled.length / 4));
@@ -200,19 +204,18 @@
             medicPool = shuffled.slice(chunk*3);
         }
 
-        // 極限防呆：確保陣列至少有一題
         if(maidPool.length === 0) maidPool = [fallbackQuestions.find(q=>q.character && q.character.includes('丫鬟')) || fallbackQuestions[0]];
         if(chefPool.length === 0) chefPool = [fallbackQuestions.find(q=>q.character && q.character.includes('膳房')) || fallbackQuestions[1]];
         if(doctorPool.length === 0) doctorPool = [fallbackQuestions.find(q=>q.character && q.character.includes('太醫')) || fallbackQuestions[2]];
         if(medicPool.length === 0) medicPool = [fallbackQuestions.find(q=>q.character && q.character.includes('醫女')) || fallbackQuestions[3]];
 
-        // 使用 .slice() 複製陣列，徹底避免使用展開運算子產生的 Syntax Error
         activePools = { 
             maid: shuffle(maidPool.slice()), 
             chef: shuffle(chefPool.slice()), 
             doctor: shuffle(doctorPool.slice()), 
             medic: shuffle(medicPool.slice()) 
         };
+        console.log("activePools 建立完成", activePools);
     }
 
     async function loadQuestions() {
@@ -225,12 +228,13 @@
                 console.log("外部題庫載入成功！共載入 " + data.length + " 題。");
             }
         } catch (error) {
-            console.warn("無法載入外部題庫 (可能在本地 file:// 環境下)，自動切換至內建備用題庫。", error);
-            // 使用 .slice() 避免展開運算子
+            console.warn("無法載入外部題庫，自動切換至內建備用題庫。", error);
             externalQuestions = fallbackQuestions.slice();
         } finally {
-            resetPools(); // 確保必定執行
-            currentState = STATES.START; // 解除 LOADING 鎖定
+            resetPools(); 
+            // --- 5. 檢查 loadQuestions() 完成後是否正確切換 ---
+            currentState = STATES.START; 
+            console.log("loadQuestions完成，狀態已切換至: STATES.START (應為 0)。目前為: ", currentState);
         }
     }
 
@@ -261,7 +265,6 @@
         ]
     };
 
-    // 每日危機事件池 
     const crisisPool = [
         {
             isCrisis: true,
@@ -295,7 +298,6 @@
         }
     ];
 
-    // 移除展開運算子
     let activeCrisis = shuffle(crisisPool.slice());
 
     const randomEventsPool = [
@@ -1082,8 +1084,13 @@
     }
 
     function gameLoop(timestamp) {
+        if (!timestamp) timestamp = performance.now();
+        if (!lastTime) lastTime = timestamp;
         dt = (timestamp - lastTime) / 1000 || 0;
-        lastTime = timestamp; time += dt;
+        if (dt > 0.1) dt = 0.016; 
+        lastTime = timestamp; 
+        time += dt;
+        if (isNaN(time)) time = 0;
 
         mouse.x += (mouse.targetX - mouse.x) * 10 * dt; mouse.y += (mouse.targetY - mouse.y) * 10 * dt;
         if (cameraShake.amount > 0.1) {
@@ -1100,6 +1107,7 @@
         } else {
             globalAlpha = 1;
         }
+        if (isNaN(globalAlpha)) globalAlpha = 1;
         ctx.globalAlpha = globalAlpha;
 
         drawSceneBackground(ctx);
@@ -1385,6 +1393,7 @@
 
     // 啟動程式 
     loadQuestions();
+    requestAnimationFrame(gameLoop); // 確保一開始就開始繪製
 
 </script>
 </body>
