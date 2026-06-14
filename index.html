@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>汴京娘子調養記 - AAA Cinematic Edition</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #05070a;
+            font-family: 'Kaiti', '標楷體', 'Times New Roman', serif;
+            overflow: hidden; 
+            color: #fff;
+            user-select: none; 
+            -webkit-user-select: none;
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false }); 
+
+    const FONT_FAMILY = '"Kaiti", "標楷體", "Times New Roman", serif';
+
+    // 自適應滿版系統
+    let dpr = window.devicePixelRatio || 1;
+    let cw = window.innerWidth;
+    let ch = window.innerHeight;
+    
+    function resize() {
+        cw = window.innerWidth;
+        ch = window.innerHeight;
+        canvas.width = cw * dpr;
+        canvas.height = ch * dpr;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // 遊戲狀態機
+    const STATES = { START: 0, DAY_TRANSITION: 1, FREE_ACTION: 2, ACTION_RESULT: 3, RANDOM_EVENT: 4, HIDDEN_EVENT: 5, INTERACT_CHOICE: 6, STORY: 7, QUESTION: 8, FEEDBACK: 9, END: 10, LOADING: 11 };
+    let currentState = STATES.LOADING; // 初始狀態改為載入中
+    let currentDay = 1;
+    let currentStage = null;
+    let currentStoryLine = 0;
+    let selectedOptionFeedback = "";
+    
+    let mouse = { x: cw/2, y: ch/2, targetX: cw/2, targetY: ch/2, isDown: false };
+    let time = 0, dt = 0, lastTime = 0;
+    let clickZones = []; 
+    
+    let cameraShake = { x: 0, y: 0, amount: 0 };
+    let bloomIntensity = 0;
+    let bloomColor = '255,255,255';
+    let globalAlpha = 1; 
+    
+    // 玩家屬性系統
+    let player = { 
+        knowledge: 50,    // 智慧
+        health: 80,       // 體力
+        reputation: 50,   // 聲望
+        bond: 50,         // 孩子羈絆
+        ap: 3,            // 每日行動力
+        affections: {
+            maid: { name: "丫鬟 春桃", current: 20, target: 20, max: 100, color: "#e86f88", status: "陌生" },
+            chef: { name: "膳房 總管", current: 20, target: 20, max: 100, color: "#d29c72", status: "陌生" },
+            doctor: { name: "太醫 張大人", current: 20, target: 20, max: 100, color: "#6ca07e", status: "陌生" },
+            medic: { name: "醫女 蘇氏", current: 20, target: 20, max: 100, color: "#82c0d9", status: "陌生" }
+        }
+    };
+
+    let currentRandomEvent = null;
+    let currentHiddenEvent = null;
+    let currentEnding = null;
+
+    // --- 劇情資料 ---
+    const daysData = [
+        { day: "產後第一天", weather: "sunny", location: "華麗正房", event: "初為人母，您抱著剛出生的孩兒，心中充滿溫暖。大宋的陽光和煦，是個好兆頭。" },
+        { day: "產後第二天", weather: "cloudy", location: "侯府花園", event: "天色微陰。小少爺的哭聲劃破了寧靜，新手母親與下人們共同努力照護。" },
+        { day: "產後第三天", weather: "rainy", location: "侯府正廳", event: "窗外下起淅瀝小雨。今日似乎有來自府外的特別關切與愛護。" }, 
+        { day: "產後第四天", weather: "snowy", location: "雅致書閣", event: "氣溫驟降，飛雪連天。隨著奶水自然分泌，您的雙乳感到沉重與奇妙的變化。" },
+        { day: "產後第五天", weather: "sunny", location: "膳房外廂", event: "大雪初霽。看著寶寶喝奶，大家都在為夫人的發奶膳食出謀劃策。" },
+        { day: "產後第六天", weather: "cloudy", location: "華麗正房", event: "夜裡微風徐徐。寶寶頻繁的討奶需要考驗著您的溫柔與耐性。" },
+        { day: "產後第七天", weather: "sunny", location: "侯府花園", event: "轉眼已至第七日，您在大家的陪伴下，即將完成初期的調養適應。" }
+    ];
+
+    function shuffle(array) {
+        let currentIndex = array.length, randomIndex;
+        while (currentIndex !== 0) {
+            randomIndex = Math.floor(Math.random() * currentIndex);
+            currentIndex--;
+            [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+        }
+        return array;
+    }
+
+    // --- 題庫系統 ---
+    let externalQuestions = []; // 儲存外部載入的題庫
+    
+    // 內建備用題庫 (Fallback) - 結構更新以符合新 JSON 格式
+    const fallbackQuestions = [
+        {
+            "id": "fb_1",
+            "category": "產後調養",
+            "character": "醫女 蘇氏",
+            "story": [
+                "「夫人，小主子轉頭舔唇、把小手放進嘴裡，這是『尋乳信號』了。」",
+                "【調養小記】：舔唇、吃手是飢餓的早期信號，若等到嚎啕大哭已是過度飢餓。"
+            ],
+            "question": "看到寶寶的早期尋乳信號，夫人該怎麼做？",
+            "options": [
+                {
+                    "text": "趁他情緒安穩、尚未大哭前，趕緊抱過來依需求親餵。",
+                    "feedback": "【蘇醫女 欣喜】夫人抓時機真準！這時餵奶寶寶情緒穩定，含乳最順利！",
+                    "expr": "happy",
+                    "effects": { "knowledge": 20, "medic": 15, "bond": 5 }
+                },
+                {
+                    "text": "嚴格遵守長輩定時四小時餵一次的規矩，沒到先別理他。",
+                    "feedback": "【蘇醫女 柔聲提醒】等他哭鬧厲害時，往往就因為太餓而不好含乳了呢。",
+                    "expr": "shocked",
+                    "effects": { "knowledge": -10, "medic": -5, "bond": -5 }
+                },
+                {
+                    "text": "覺得吃手是不乖的壞習慣，拿手套把他的小手綁起來。",
+                    "feedback": "【蘇醫女 趕忙解釋】吃手是新生兒天生的尋乳反射，他在告訴您想喝奶了。",
+                    "expr": "normal",
+                    "effects": { "knowledge": -15, "medic": -10 }
+                }
+            ]
+        },
+        {
+            "id": "fb_2",
+            "category": "飲食調理",
+            "character": "膳房 總管",
+            "story": [
+                "「夫人！這十全大補麻油豬腳湯上面浮著厚油，最是滋補發奶！」",
+                "【調養小記】：產後發奶應多攝取水分與清淡蛋白質。過於油膩的濃湯容易導致乳汁脂肪過高，造成乳腺阻塞。"
+            ],
+            "question": "為了順暢發奶且不塞奶，夫人該如何選擇？",
+            "options": [
+                {
+                    "text": "撇去浮油，平日多喝清淡的魚湯與水分。",
+                    "feedback": "【總管 敬佩】清淡的高蛋白湯水好吸收又發奶，夫人深諳養生之道！",
+                    "expr": "happy",
+                    "effects": { "knowledge": 15, "chef": 20, "health": 10 }
+                },
+                {
+                    "text": "為了多產點奶，硬著頭皮把這整鍋油膩濃湯喝光。",
+                    "feedback": "【總管 擔憂】太過油膩容易讓乳汁脂肪過高，反倒容易塞奶。",
+                    "expr": "shocked",
+                    "effects": { "knowledge": -10, "chef": -5, "health": -15 }
+                },
+                {
+                    "text": "覺得胃口全無，什麼湯水都不想喝，空腹一整天。",
+                    "feedback": "【總管 慌忙規勸】夫人產後身子虛可不能不吃東西，奴才去熬小米粥。",
+                    "expr": "normal",
+                    "effects": { "knowledge": -5, "chef": -10, "health": -20 }
+                }
+            ]
+        },
+        {
+            "id": "fb_3",
+            "category": "產後調養",
+            "character": "太醫 張大人",
+            "story": [
+                "「夫人，小主子若含乳姿勢不對，只含住乳頭會導致微血管破損流血。」",
+                "【調養小記】：正確含乳應讓寶寶嘴巴張大，含住「大部分的乳暈」，下巴貼緊乳房。"
+            ],
+            "question": "為避免乳頭破損，正確的含乳姿勢應該是？",
+            "options": [
+                {
+                    "text": "讓寶寶嘴巴張大，下巴緊貼乳房，含住大部分乳暈。",
+                    "feedback": "【太醫 點頭稱是】大口含住乳暈才能正確擠壓乳腺，親餵才不會痛！",
+                    "expr": "happy",
+                    "effects": { "knowledge": 20, "doctor": 20 }
+                },
+                {
+                    "text": "做母親的忍一忍就過去了，只要寶寶含住前端用力吸就好。",
+                    "feedback": "【太醫 搖頭嘆息】萬萬不可強忍！只含乳頭會導致嚴重破損與發炎啊。",
+                    "expr": "shocked",
+                    "effects": { "knowledge": -15, "doctor": -15, "health": -10 }
+                },
+                {
+                    "text": "破損太痛了，內心恐懼，決定徹底放棄哺乳改餵水。",
+                    "feedback": "【太醫 柔聲規勸】微臣這就讓醫女來協助您調整姿勢，切莫沮喪。",
+                    "expr": "normal",
+                    "effects": { "knowledge": -10, "doctor": -10 }
+                }
+            ]
+        },
+        {
+            "id": "fb_4",
+            "category": "育兒知識",
+            "character": "丫鬟 春桃",
+            "story": [
+                "「夫人，母奶看起來好稀，小主子真的有吃飽嗎？」",
+                "【調養小記】：判斷吃飽最客觀的指標是尿布量。出生第四天後，一天有6片以上沉甸甸的濕尿布即充足。"
+            ],
+            "question": "判斷寶寶有沒有吃飽，最客觀科學的指標是？",
+            "options": [
+                {
+                    "text": "觀察尿布。一天有 6 片以上沉甸甸濕尿布便是有吃飽了。",
+                    "feedback": "【春桃 恍然大悟】原來如此！看尿量最準確，奴婢去記尿布！",
+                    "expr": "happy",
+                    "effects": { "knowledge": 15, "maid": 20 }
+                },
+                {
+                    "text": "只要他一哭就是沒吃飽，立刻給他補配方奶！",
+                    "feedback": "【春桃 擔憂】夫人...過度補奶反而會讓您的母乳分泌變少喔。",
+                    "expr": "shocked",
+                    "effects": { "knowledge": -10, "maid": -10 }
+                },
+                {
+                    "text": "感到很沮喪，懷疑自己的奶水沒有營養。",
+                    "feedback": "【春桃 輕聲安慰】蘇醫女說親餵量絕對足夠，您別給自己壓力。",
+                    "expr": "normal",
+                    "effects": { "knowledge": -5, "maid": -5 }
+                }
+            ]
+        }
+    ];
+
+    // 非同步載入題庫
+    async function loadQuestions() {
+        try {
+            const response = await fetch('questions.json');
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            if (Array.isArray(data) && data.length > 0) {
+                externalQuestions = data;
+                console.log("外部題庫載入成功！共載入 " + data.length + " 題。");
+            } else {
+                throw new Error("JSON 格式不正確或為空。");
+            }
+        } catch (error) {
+            console.warn("無法載入外部題庫，使用內建備用題庫。", error);
+            externalQuestions = [...fallbackQuestions];
+        } finally {
+            // 無論成功或失敗，都切換到 START 狀態
+            currentState = STATES.START;
+        }
+    }
+
+    // 啟動時載入
+    loadQuestions();
+
+    let activePools = {};
+    
+    // 依據角色分類題目 (相容舊版邏輯)
+    function resetPools() {
+        let pool = externalQuestions.length > 0 ? externalQuestions : fallbackQuestions;
+        
+        // 預設每個角色對應的池
+        let maidPool = pool.filter(q => q.character.includes('丫鬟') || q.character.includes('春桃'));
+        let chefPool = pool.filter(q => q.character.includes('膳房') || q.character.includes('總管'));
+        let doctorPool = pool.filter(q => q.character.includes('太醫') || q.character.includes('張大人'));
+        let medicPool = pool.filter(q => q.character.includes('醫女') || q.character.includes('蘇氏'));
+        
+        // 如果外部題庫沒有指定角色，平均分配
+        if(maidPool.length === 0 && chefPool.length === 0 && doctorPool.length === 0 && medicPool.length === 0) {
+            let shuffledPool = shuffle([...pool]);
+            let qPerRole = Math.floor(shuffledPool.length / 4);
+            maidPool = shuffledPool.slice(0, qPerRole);
+            chefPool = shuffledPool.slice(qPerRole, qPerRole*2);
+            doctorPool = shuffledPool.slice(qPerRole*2, qPerRole*3);
+            medicPool = shuffledPool.slice(qPerRole*3);
+        }
+
+        // 確保每個池就算沒有專屬題目，也放一些後備題目進去，避免崩潰
+        if(maidPool.length === 0) maidPool = [fallbackQuestions.find(q=>q.character.includes('丫鬟')) || fallbackQuestions[0]];
+        if(chefPool.length === 0) chefPool = [fallbackQuestions.find(q=>q.character.includes('膳房')) || fallbackQuestions[1]];
+        if(doctorPool.length === 0) doctorPool = [fallbackQuestions.find(q=>q.character.includes('太醫')) || fallbackQuestions[2]];
+        if(medicPool.length === 0) medicPool = [fallbackQuestions.find(q=>q.character.includes('醫女')) || fallbackQuestions[3]];
+
+
+        activePools = { 
+            maid: shuffle(maidPool), 
+            chef: shuffle(chefPool), 
+            doctor: shuffle(doctorPool), 
+            medic: shuffle(medicPool) 
+        };
+    }
+
+    const introStage = {   
+        character: "醫女 蘇氏",
+        story: ["【大宋汴京 · 侯府】\n昨日歷經千辛萬苦，終於平安誕下了府裡的嫡出小少爺。", "「初為人母，事事皆新。我定要好好學習調養與育兒技巧，保重鳳體。」", "「夫人，現在為您進行產後『早期肌膚接觸』。這能刺激荷爾蒙分泌。」\n【調養小記】：母乳含天然抗體與生長因子，能建立強大腸道免疫系統。"],
+        question: "望著懷中柔嫩的孩兒，您決定如何開啟這趟旅程？",
+        options: [
+            { text: "學習現代科學親餵法，與下人們攜手配合。", feedback: "【蘇醫女 欣慰】夫人做得極好！皮膚貼皮膚，激發本能！", expr: 'happy', effects: { knowledge: 20, medic: 20 } },
+            { text: "怕寶寶著涼，用厚厚的蠶絲包巾包得緊緊的。", feedback: "【蘇醫女 提醒】包得太厚無法達到『肌膚接觸』，會阻礙本能喔。", expr: 'shocked', effects: { knowledge: -10, medic: -15 } },
+            { text: "太累了，決定先推去嬰兒室交給其他人。", feedback: "【蘇醫女 勸解】若能撐過黃金接觸期，之後泌乳會更順暢，慢慢來。", expr: 'normal', effects: { knowledge: -5, medic: -20 } }
+        ]
+    };
+
+    const originStage = {
+        character: "太醫 張大人",
+        story: ["老夫人派人送來了極其珍貴的『千年人參湯』，指名要給我補身子。","「夫人！這千年人參雖是大補，但對產婦而言，卻是退奶的大忌啊！」\n【調養小記】：人參、韭菜、麥芽水等都是常見的退奶食物，哺乳期應避開。"],
+        question: "面對賞賜與太醫的勸告，您該如何應對？",
+        options: [
+            { text: "婉拒並請太醫作證會退奶，改請賜黑豆豬腳湯。", feedback: "【太醫 撫鬚】夫人睿智！既保全了顏面，又守住了小少爺的糧倉。", expr: 'happy', effects: { knowledge: 20, doctor: 20 } },
+            { text: "為了面子硬著頭皮喝下去。", feedback: "【太醫 擔憂】這...夫人，您喝了之後當晚奶水疏少，下次可得留心了。", expr: 'shocked', effects: { knowledge: -15, doctor: -20, health: -10 } },
+            { text: "有些不知所措，不知道該聽誰的。", feedback: "【太醫 溫言勸阻】夫人莫慌。這參湯咱們婉言推辭即可。", expr: 'normal', effects: { doctor: -10 } }
+        ]
+    };
+
+    // --- 事件系統擴充 ---
+    const randomEventsPool = [
+        { text: "小少爺看著您咿呀學語，似乎認出了娘親，笑得格外開心。", apply: () => { player.bond += 10; return "羈絆提升 (+10)"; }, expr: 'happy' },
+        { text: "昨夜小少爺哭鬧不休，折騰了一宿，您幾乎沒有闔眼...", apply: () => { player.health -= 15; return "體力嚴重透支 (-15)"; }, expr: 'shocked' },
+        { text: "老夫人派人送來了上好的燕窩，叮囑您好好調理身子。", apply: () => { player.health += 10; player.reputation += 5; return "體力提升 (+10), 聲望微升 (+5)"; }, expr: 'happy' },
+        { text: "京城內流傳著您前些日子發善心施粥的美名。", apply: () => { player.reputation += 15; return "聲望大幅提升 (+15)"; }, expr: 'happy' },
+        { text: "您突然回想起昨日醫女教授的調養知識，茅塞頓開！", apply: () => { player.knowledge += 10; return "智慧靈光一閃 (+10)"; }, expr: 'happy' },
+    ];
+
+    const hiddenEventsPool = [
+        { id: "he_wisdom", triggered: false, check: () => player.knowledge >= 80, text: "【隱藏事件：著書立說】\n您的育兒知識淵博，甚至吸引了京城名醫前來求教。您順勢編纂了一本《侯府育兒小記》。\n\n「夫人之才，堪為天下慈母之表率！」", apply: () => { player.reputation += 20; return "聲望大幅提升 (+20)"; }, expr: 'happy' },
+        { id: "he_bond", triggered: false, check: () => player.bond >= 80, text: "【隱藏事件：母子連心】\n小少爺對您的氣味異常依賴，只要您一靠近，他便會露出甜美的笑容。\n\n看著他熟睡的臉龐，您覺得一切辛苦都值得了。", apply: () => { player.health += 15; return "母愛帶來力量！體力恢復 (+15)"; }, expr: 'happy' },
+        { id: "he_reputation", triggered: false, check: () => player.reputation >= 80, text: "【隱藏事件：誥命加身】\n您的賢良之名傳入宮中，皇后特賜如意一柄，以彰顯侯府主母之德。\n\n全府上下皆以此為榮。", apply: () => { for(let k in player.affections) player.affections[k].target += 10; return "全府上下引以為傲！好感提升 (+10)"; }, expr: 'happy' },
+        { id: "he_npc_maid", triggered: false, check: () => player.affections.maid.target >= 90, text: "【特殊羈絆：主僕同心】\n春桃深夜為您熬製了安神湯，紅著眼眶發誓此生誓死追隨夫人。\n\n「夫人待奴婢如親妹，奴婢定結草銜環以報！」", apply: () => { player.health += 20; return "身心舒暢，體力恢復 (+20)"; }, expr: 'happy' },
+        { id: "he_npc_chef", triggered: false, check: () => player.affections.chef.target >= 90, text: "【特殊羈絆：山珍海味】\n膳房總管研發出了絕世發奶藥膳，特地為您呈上，以謝主母知遇之恩。\n\n「奴才這點手藝，全憑夫人賞識！」", apply: () => { player.health += 20; return "氣血充盈，體力恢復 (+20)"; }, expr: 'happy' }
+    ];
+
+    function triggerHiddenEvent() {
+        for (let i=0; i<hiddenEventsPool.length; i++) {
+            let ev = hiddenEventsPool[i];
+            if (!ev.triggered && ev.check()) {
+                ev.triggered = true;
+                currentHiddenEvent = { text: ev.text, feedback: ev.apply() };
+                mainCharacter.setEmotion(ev.expr);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // --- 粒子特效 ---
+    class DustParticle {
+        constructor() {
+            this.x = Math.random() * cw; this.y = Math.random() * ch;
+            this.size = Math.random() * 2 + 0.5;
+            this.vx = (Math.random() - 0.5) * 0.5; this.vy = (Math.random() - 0.5) * 0.5 - 0.2;
+            this.life = Math.random() * Math.PI * 2;
+        }
+        update(dt) {
+            this.x += this.vx + Math.sin(time + this.life) * 0.5; this.y += this.vy; this.life += dt;
+            if (this.y < 0) this.y = ch; if (this.x < 0) this.x = cw; if (this.x > cw) this.x = 0;
+        }
+        draw(ctx) {
+            let alpha = (Math.sin(this.life * 2) + 1) * 0.3;
+            ctx.fillStyle = `rgba(255, 220, 150, ${alpha})`;
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
+        }
+    }
+    let dustParticles = [];
+    for(let i=0; i<40; i++) dustParticles.push(new DustParticle());
+
+    // --- Live2D 渲染引擎 ---
+    class ProceduralLive2DCharacter {
+        constructor(role, customColors = null) {
+            this.role = role; 
+            this.breathingPhase = Math.random() * Math.PI;
+            this.hairPhase = Math.random() * Math.PI;
+            this.blinkTimer = Math.random() * 3;
+            this.eyeOpenness = 1;
+            
+            this.targetEmotion = { smile: 0, browAngle: 0, eyeWide: 1.0 };
+            this.currentEmotion = { smile: 0, browAngle: 0, eyeWide: 1.0 };
+            
+            this.appearScale = 0;
+            this.appearY = 100;
+            
+            this.colors = customColors || {
+                skinBase: '#fae3d9', skinShadow: '#d9a896', skinHighlight: '#fff1ec',
+                hairDark: '#0a0b10', hairLight: '#2c2f3f',
+                silkBase: '#8b1e28', silkShadow: '#4a0e14', goldTrim: '#d4af37'
+            };
+        }
+
+        setEmotion(emotionType) {
+            switch(emotionType) {
+                case 'happy': this.targetEmotion = { smile: 1.2, browAngle: 0.3, eyeWide: 0.9 }; break;
+                case 'shocked': this.targetEmotion = { smile: -0.3, browAngle: 0.6, eyeWide: 1.3 }; break;
+                case 'angry': this.targetEmotion = { smile: -0.6, browAngle: -0.7, eyeWide: 0.9 }; break;
+                default: this.targetEmotion = { smile: 0.2, browAngle: 0, eyeWide: 1.0 }; break;
+            }
+        }
+
+        update(dt) {
+            let breathSpeed = this.role === 'chef' ? 1.0 : 1.5;
+            if (this.currentEmotion.smile < -0.3) breathSpeed *= 1.5; 
+            this.breathingPhase += dt * breathSpeed; 
+            
+            this.hairPhase += dt * 2.0;
+
+            this.blinkTimer -= dt;
+            if (this.blinkTimer <= 0) {
+                this.eyeOpenness -= dt * 15;
+                if (this.eyeOpenness <= 0) {
+                    this.eyeOpenness = 0;
+                    this.blinkTimer = Math.random() * 3 + 2; 
+                }
+            } else {
+                this.eyeOpenness += dt * 10;
+                if (this.eyeOpenness > 1) this.eyeOpenness = 1;
+            }
+
+            this.currentEmotion.smile += (this.targetEmotion.smile - this.currentEmotion.smile) * dt * 5;
+            this.currentEmotion.browAngle += (this.targetEmotion.browAngle - this.currentEmotion.browAngle) * dt * 5;
+            this.currentEmotion.eyeWide += (this.targetEmotion.eyeWide - this.currentEmotion.eyeWide) * dt * 5;
+            
+            this.appearScale += (1 - this.appearScale) * dt * 8;
+            this.appearY += (0 - this.appearY) * dt * 8;
+        }
+
+        resetAppearance() {
+            this.appearScale = 0.5;
+            this.appearY = 50;
+        }
+
+        draw(ctx, cx, cy, scale, isMini = false) {
+            ctx.save();
+            ctx.translate(cx, cy + (isMini ? 0 : this.appearY));
+            ctx.scale(scale * (isMini ? 1 : this.appearScale), scale * (isMini ? 1 : this.appearScale));
+
+            let breathY = Math.sin(this.breathingPhase) * 3;
+            let breathScale = 1 + Math.sin(this.breathingPhase) * 0.005;
+            let swayX = Math.sin(this.hairPhase) * 4;
+            let swayY = Math.cos(this.hairPhase * 0.8) * 2;
+
+            let lookDx = isMini ? 0 : (mouse.x - cx) * 0.015;
+            let lookDy = isMini ? 0 : (mouse.y - cy) * 0.015;
+
+            this.drawBackHair(ctx, swayX, swayY);
+
+            ctx.save();
+            ctx.translate(lookDx * 0.5, breathY);
+            ctx.scale(1, breathScale);
+            this.drawBody(ctx, isMini);
+            ctx.restore();
+
+            ctx.save();
+            ctx.translate(lookDx, lookDy + breathY * 0.5);
+            this.drawFaceBase(ctx, isMini);
+            
+            ctx.save();
+            ctx.translate(lookDx * 0.3, lookDy * 0.3);
+            this.drawFeatures(ctx);
+            ctx.restore();
+
+            this.drawFrontHair(ctx, swayX, swayY);
+            ctx.restore();
+
+            if (!isMini) this.drawCinematicLighting(ctx, cx, cy);
+
+            ctx.restore();
+        }
+
+        drawBody(ctx, isMini) {
+            let silkGrad = ctx.createLinearGradient(0, 0, 0, 300);
+            silkGrad.addColorStop(0, this.colors.silkBase);
+            silkGrad.addColorStop(1, this.colors.silkShadow);
+
+            ctx.fillStyle = silkGrad;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = isMini ? 0 : 15;
+            
+            ctx.beginPath();
+            if (this.role === 'chef') {
+                ctx.moveTo(-170, 300); ctx.quadraticCurveTo(-120, 80, -40, 80); ctx.lineTo(40, 80); ctx.quadraticCurveTo(120, 80, 170, 300);
+            } else if (this.role === 'doctor') {
+                ctx.moveTo(-140, 300); ctx.lineTo(-90, 80); ctx.lineTo(90, 80); ctx.lineTo(140, 300);
+            } else {
+                ctx.moveTo(-130, 300); ctx.quadraticCurveTo(-90, 80, -30, 80); ctx.lineTo(30, 80); ctx.quadraticCurveTo(90, 80, 130, 300);
+            }
+            ctx.fill(); ctx.shadowBlur = 0;
+
+            let collarGrad = ctx.createLinearGradient(-50, 80, 50, 150);
+            collarGrad.addColorStop(0, '#e6e6e6'); collarGrad.addColorStop(1, '#b3b3b3');
+            ctx.fillStyle = collarGrad;
+            
+            if (this.role === 'doctor') {
+                ctx.beginPath(); ctx.arc(0, 100, 50, Math.PI, 0); ctx.lineTo(50,120); ctx.lineTo(-50,120); ctx.fill();
+            } else {
+                ctx.beginPath(); ctx.moveTo(-50, 80); ctx.lineTo(0, 140); ctx.lineTo(50, 80); ctx.lineTo(80, 100); ctx.lineTo(0, 200); ctx.lineTo(-80, 100); ctx.fill();
+            }
+
+            if (this.colors.goldTrim) {
+                ctx.strokeStyle = this.colors.goldTrim; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.moveTo(-70, 95); ctx.lineTo(0, 190); ctx.lineTo(70, 95); ctx.stroke();
+            }
+            
+            let neckGrad = ctx.createLinearGradient(0, 50, 0, 90);
+            neckGrad.addColorStop(0, this.colors.skinShadow); neckGrad.addColorStop(1, this.colors.skinBase);
+            ctx.fillStyle = neckGrad;
+            ctx.beginPath(); 
+            if(this.role === 'chef') {
+                ctx.moveTo(-30, 40); ctx.lineTo(30, 40); ctx.lineTo(35, 90); ctx.lineTo(-35, 90); 
+            } else {
+                ctx.moveTo(-20, 40); ctx.lineTo(20, 40); ctx.lineTo(25, 90); ctx.lineTo(-25, 90); 
+            }
+            ctx.fill();
+        }
+
+        drawFaceBase(ctx, isMini) {
+            let faceGrad = ctx.createRadialGradient(0, -20, 10, 0, 0, 80);
+            faceGrad.addColorStop(0, this.colors.skinHighlight);
+            faceGrad.addColorStop(0.7, this.colors.skinBase);
+            faceGrad.addColorStop(1, this.colors.skinShadow);
+
+            ctx.fillStyle = faceGrad;
+            ctx.shadowColor = 'rgba(0,0,0,0.2)'; ctx.shadowBlur = isMini ? 0 : 10;
+            
+            ctx.beginPath();
+            if (this.role === 'chef') {
+                ctx.moveTo(0, 70); ctx.bezierCurveTo(60, 60, 75, 0, 65, -40); ctx.bezierCurveTo(60, -80, -60, -80, -65, -40); ctx.bezierCurveTo(-75, 0, -60, 60, 0, 70);
+            } else if (this.role === 'doctor') {
+                ctx.moveTo(0, 65); ctx.bezierCurveTo(40, 50, 50, 0, 45, -40); ctx.bezierCurveTo(40, -80, -40, -80, -45, -40); ctx.bezierCurveTo(-50, 0, -40, 50, 0, 65);
+            } else {
+                ctx.moveTo(0, 60); ctx.bezierCurveTo(45, 50, 55, 0, 50, -40); ctx.bezierCurveTo(45, -80, -45, -80, -50, -40); ctx.bezierCurveTo(-55, 0, -45, 50, 0, 60);
+            }
+            ctx.fill(); ctx.shadowBlur = 0;
+
+            if (this.role === 'player' || this.role === 'maid' || this.role === 'medic') {
+                ctx.globalCompositeOperation = 'multiply';
+                let blushGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 20);
+                blushGrad.addColorStop(0, 'rgba(255, 100, 100, 0.18)'); blushGrad.addColorStop(1, 'rgba(255, 100, 100, 0)');
+                ctx.save(); ctx.translate(-35, 10); ctx.fillStyle = blushGrad; ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill(); ctx.restore();
+                ctx.save(); ctx.translate(35, 10); ctx.fillStyle = blushGrad; ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill(); ctx.restore();
+                ctx.globalCompositeOperation = 'source-over';
+            }
+        }
+
+        drawFeatures(ctx) {
+            ctx.strokeStyle = '#2a1a10'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+            let browY = -35; let browA = this.currentEmotion.browAngle * 10;
+            
+            if(this.role === 'doctor' || this.role === 'chef') { ctx.lineWidth = 4; browY = -30; }
+
+            ctx.beginPath(); ctx.moveTo(-45, browY - browA); ctx.quadraticCurveTo(-30, browY - 5, -15, browY + browA); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(45, browY - browA); ctx.quadraticCurveTo(30, browY - 5, 15, browY + browA); ctx.stroke();
+
+            let eyeY = -10;
+            let eyeMod = (this.role === 'doctor' || this.role === 'chef') ? 0.6 : 1.0;
+            let eyeScaleY = this.eyeOpenness * this.currentEmotion.eyeWide * eyeMod;
+            
+            const drawEye = (ex, ey, flip) => {
+                ctx.save(); ctx.translate(ex, ey); ctx.scale(flip ? -1 : 1, 1);
+                
+                ctx.fillStyle = '#fcfcfc'; 
+                ctx.beginPath(); ctx.moveTo(-15, 0); ctx.quadraticCurveTo(0, -12 * eyeScaleY, 15, 0); ctx.quadraticCurveTo(0, 4 * eyeScaleY, -15, 0); ctx.fill();
+
+                if (eyeScaleY > 0.1) {
+                    ctx.save(); ctx.beginPath(); ctx.moveTo(-15, 0); ctx.quadraticCurveTo(0, -12 * eyeScaleY, 15, 0); ctx.quadraticCurveTo(0, 4 * eyeScaleY, -15, 0); ctx.clip();
+                    let irisGrad = ctx.createRadialGradient(0, 2, 0, 0, 0, 8);
+                    irisGrad.addColorStop(0, (this.role==='player')?'#8c5a35':'#4a3020'); 
+                    irisGrad.addColorStop(1, '#1a0a05');
+                    ctx.fillStyle = irisGrad; ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = '#0a0502'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
+                    
+                    if(this.role !== 'chef' && this.role !== 'doctor') {
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; ctx.beginPath(); ctx.arc(-3, -3, 2, 0, Math.PI*2); ctx.fill();
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'; ctx.beginPath(); ctx.arc(3, 3, 1.5, 0, Math.PI*2); ctx.fill();
+                    } else {
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'; ctx.beginPath(); ctx.arc(-2, -2, 1.5, 0, Math.PI*2); ctx.fill();
+                    }
+                    ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.arc(0, -8, 10, 0, Math.PI*2); ctx.fill();
+                    ctx.restore(); 
+                }
+
+                ctx.strokeStyle = '#1a0a05'; ctx.lineWidth = (this.role === 'player' || this.role === 'maid') ? 3.5 : 2;
+                ctx.beginPath(); ctx.moveTo(-18, 2); ctx.quadraticCurveTo(0, -14 * eyeScaleY, 18, 2); ctx.stroke();
+                
+                if(this.role === 'player' || this.role === 'maid' || this.role === 'medic') {
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(22, -6 * eyeScaleY); ctx.stroke();
+                }
+                ctx.restore();
+            };
+
+            drawEye(-25, eyeY, false); drawEye(25, eyeY, true);
+
+            ctx.fillStyle = this.colors.skinShadow; ctx.beginPath(); ctx.arc(0, 15, (this.role==='chef')?3:1.5, 0, Math.PI*2); ctx.fill();
+            
+            let mouthY = 35; let smile = this.currentEmotion.smile * 5;
+            let lipGrad = ctx.createLinearGradient(0, mouthY-2, 0, mouthY+5);
+            lipGrad.addColorStop(0, (this.role==='doctor'||this.role==='chef')?'#a67c7c':'#c75c5c'); 
+            lipGrad.addColorStop(1, (this.role==='doctor'||this.role==='chef')?'#8a5c5c':'#a63c3c');
+            
+            ctx.fillStyle = lipGrad; ctx.strokeStyle = (this.role==='doctor'||this.role==='chef')?'#6b3b3b':'#8a2b2b'; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(-10, mouthY - smile*0.5); ctx.quadraticCurveTo(0, mouthY + smile, 10, mouthY - smile*0.5); ctx.quadraticCurveTo(0, mouthY + 3 + smile, -10, mouthY - smile*0.5);
+            ctx.fill(); ctx.stroke();
+
+            if (this.role === 'doctor') {
+                ctx.fillStyle = '#3a3a3a';
+                ctx.beginPath(); ctx.moveTo(-15, 45); ctx.quadraticCurveTo(0, 140, 15, 45); ctx.quadraticCurveTo(0, 60, -15, 45); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(-5, 28); ctx.quadraticCurveTo(-25, 35, -30, 45); ctx.quadraticCurveTo(-15, 30, -5, 28); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(5, 28); ctx.quadraticCurveTo(25, 35, 30, 45); ctx.quadraticCurveTo(15, 30, 5, 28); ctx.fill();
+            } else if (this.role === 'chef') {
+                ctx.fillStyle = '#1a100a';
+                ctx.beginPath(); ctx.moveTo(-8, 26); ctx.quadraticCurveTo(-25, 30, -35, 40); ctx.quadraticCurveTo(-15, 38, -8, 30); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(8, 26); ctx.quadraticCurveTo(25, 30, 35, 40); ctx.quadraticCurveTo(15, 38, 8, 30); ctx.fill();
+            }
+        }
+
+        drawBackHair(ctx, swayX, swayY) {
+            if (this.role === 'chef' || this.role === 'doctor') return; 
+            
+            let hGrad = ctx.createLinearGradient(0, -100, 0, 300);
+            hGrad.addColorStop(0, this.colors.hairLight); hGrad.addColorStop(1, '#000000');
+            ctx.fillStyle = hGrad;
+            
+            if (this.role === 'player') {
+                ctx.beginPath(); ctx.moveTo(-50, -50); ctx.bezierCurveTo(-100, 50, -120 + swayX, 200, -80 + swayX*1.5, 300 + swayY);
+                ctx.lineTo(80 + swayX*1.5, 300 + swayY); ctx.bezierCurveTo(120 + swayX, 200, 100, 50, 50, -50); ctx.fill();
+            } else if (this.role === 'maid') {
+                ctx.beginPath(); ctx.moveTo(-40, -50); ctx.bezierCurveTo(-80, 50, -90 + swayX, 120, -70 + swayX, 150 + swayY);
+                ctx.lineTo(70 + swayX, 150 + swayY); ctx.bezierCurveTo(90 + swayX, 120, 80, 50, 40, -50); ctx.fill();
+            } else if (this.role === 'medic') {
+                ctx.beginPath(); ctx.arc(0, -30, 50, 0, Math.PI*2); ctx.fill();
+            }
+        }
+
+        drawFrontHair(ctx, swayX, swayY) {
+            ctx.fillStyle = this.colors.hairDark;
+
+            if (this.role === 'chef') {
+                ctx.fillStyle = '#6e523f'; ctx.beginPath(); ctx.arc(0, -45, 55, Math.PI, 0); ctx.fill(); 
+                ctx.fillRect(-55, -45, 110, 20); ctx.fillStyle = '#4a3528'; ctx.fillRect(-55, -30, 110, 5); 
+                return;
+            }
+            if (this.role === 'doctor') {
+                ctx.fillStyle = '#111'; ctx.fillRect(-45, -90, 90, 60); ctx.beginPath(); ctx.arc(0, -90, 45, Math.PI, 0); ctx.fill();
+                ctx.fillRect(-50, -30, 100, 10); ctx.fillStyle = '#0a0a0a'; ctx.fillRect(-120, -45, 70, 15); ctx.fillRect(50, -45, 70, 15);
+                return;
+            }
+
+            ctx.beginPath(); ctx.arc(0, -50, 60, Math.PI, 0); ctx.fill();
+
+            const drawStrand = (sx, sy, c1x, c1y, c2x, c2y, ex, ey, w) => {
+                ctx.beginPath(); ctx.moveTo(sx, sy); ctx.bezierCurveTo(c1x, c1y, c2x, c2y, ex, ey); 
+                ctx.bezierCurveTo(c2x + w, c2y, c1x + w, c1y, sx + w, sy); ctx.fill();
+            };
+
+            let hGrad = ctx.createLinearGradient(0, -100, 0, 50);
+            hGrad.addColorStop(0, this.colors.hairLight); hGrad.addColorStop(1, this.colors.hairDark);
+            ctx.fillStyle = hGrad;
+
+            if (this.role === 'player') {
+                drawStrand(-55, -20, -70, 20, -75 + swayX, 80, -65 + swayX, 120 + swayY, 15);
+                drawStrand(40, -20, 55, 20, 60 + swayX, 80, 50 + swayX, 120 + swayY, 15);
+                drawStrand(-20, -60, -30, -20, -25 + swayX*0.2, 0, -10 + swayX*0.5, 10, 20);
+                drawStrand(0, -60, 10, -20, 15 + swayX*0.2, 0, 25 + swayX*0.5, -5, 25);
+                
+                ctx.strokeStyle = this.colors.goldTrim; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(-50, -40); ctx.lineTo(-70 + swayX*1.5, 10 + swayY*1.5); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(50, -40); ctx.lineTo(70 + swayX*1.5, 10 + swayY*1.5); ctx.stroke();
+                ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(-70 + swayX*1.5, 10 + swayY*1.5, 4, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(70 + swayX*1.5, 10 + swayY*1.5, 4, 0, Math.PI*2); ctx.fill();
+            } 
+            else if (this.role === 'maid') {
+                ctx.beginPath(); ctx.arc(-45, -80, 25, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(45, -80, 25, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 4;
+                ctx.beginPath(); ctx.arc(-45, -80, 25, 0, Math.PI); ctx.stroke();
+                ctx.beginPath(); ctx.arc(45, -80, 25, 0, Math.PI); ctx.stroke();
+                drawStrand(-25, -55, -30, -20, -15, -10, -5, 0, 25);
+                drawStrand(0, -55, 10, -20, 20, -10, 30, -5, 25);
+            }
+            else if (this.role === 'medic') {
+                ctx.fillStyle = '#d4e6f1'; ctx.beginPath(); ctx.arc(0, -60, 58, Math.PI, 0); ctx.fill();
+                ctx.fillRect(-58, -60, 116, 25); ctx.fillStyle = '#a9cce3'; ctx.fillRect(-58, -35, 116, 5);
+                drawStrand(-45, -35, -50, 0, -40 + swayX*0.5, 20, -30 + swayX*0.5, 40, 15);
+                drawStrand(30, -35, 40, 0, 45 + swayX*0.5, 20, 35 + swayX*0.5, 40, 15);
+            }
+
+            if(this.role !== 'medic') {
+                ctx.globalCompositeOperation = 'screen';
+                let haloGrad = ctx.createLinearGradient(0, -70, 0, -40);
+                haloGrad.addColorStop(0, 'rgba(255,255,255,0)'); haloGrad.addColorStop(0.5, 'rgba(150, 160, 200, 0.3)'); haloGrad.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = haloGrad; ctx.beginPath(); ctx.ellipse(0, -55, 50, 12, 0, 0, Math.PI*2); ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+            }
+        }
+
+        drawCinematicLighting(ctx, cx, cy) {
+            let dx = mouse.x - cx; let dy = mouse.y - cy;
+            ctx.globalCompositeOperation = 'screen';
+            
+            let rimGrad = ctx.createRadialGradient(dx * 0.5, dy * 0.5, 50, 0, 0, 300);
+            rimGrad.addColorStop(0, 'rgba(212, 175, 55, 0.25)'); 
+            rimGrad.addColorStop(0.5, 'rgba(100, 150, 255, 0.1)'); 
+            rimGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            
+            ctx.fillStyle = rimGrad; ctx.fillRect(-200, -200, 400, 500);
+
+            let specGrad = ctx.createRadialGradient(dx*0.1, dy*0.1, 0, dx*0.1, dy*0.1, 80);
+            specGrad.addColorStop(0, 'rgba(255, 255, 255, 0.1)'); specGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = specGrad; ctx.fillRect(-200, -200, 400, 500);
+            ctx.globalCompositeOperation = 'source-over';
+        }
+    }
+
+    const mainCharacter = new ProceduralLive2DCharacter('player');
+    const npcs = {
+        maid: new ProceduralLive2DCharacter('maid', { skinBase: '#fae3d9', skinShadow: '#d9a896', skinHighlight: '#fff1ec', hairDark: '#2a1b1d', hairLight: '#4a3236', silkBase: '#d48a9a', silkShadow: '#9c5263', goldTrim: null }),
+        chef: new ProceduralLive2DCharacter('chef', { skinBase: '#eac5a9', skinShadow: '#b89074', skinHighlight: '#fdebe0', hairDark: '#241a12', hairLight: '#4a3728', silkBase: '#8c6b4a', silkShadow: '#5c4128', goldTrim: null }),
+        doctor: new ProceduralLive2DCharacter('doctor', { skinBase: '#e3d0c1', skinShadow: '#b39c8a', skinHighlight: '#faecd9', hairDark: '#121212', hairLight: '#333333', silkBase: '#3a5a4a', silkShadow: '#1a3326', goldTrim: '#b1e6c8' }),
+        medic: new ProceduralLive2DCharacter('medic', { skinBase: '#fae3d9', skinShadow: '#d9a896', skinHighlight: '#fff1ec', hairDark: '#1a242c', hairLight: '#3a4a56', silkBase: '#6a9ab0', silkShadow: '#365b6e', goldTrim: null })
+    };
+
+    let floatingTexts = [];
+    class FloatingText {
+        constructor(x, y, text, color) {
+            this.x = x; this.y = y; this.text = text; this.color = color; this.life = 1.0; this.scale = 0.5;
+        }
+        update() { this.y -= 1.2; this.life -= 0.015; this.scale += (1 - this.scale) * 0.2; }
+        draw(ctx) {
+            ctx.save(); ctx.globalAlpha = Math.max(0, this.life); ctx.translate(this.x, this.y); ctx.scale(this.scale, this.scale);
+            ctx.fillStyle = this.color; ctx.font = `bold 28px ${FONT_FAMILY}`; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4; 
+            ctx.textAlign = 'center'; ctx.fillText(this.text, 0, 0); ctx.restore();
+        }
+    }
+
+    // --- 修改：套用動態效果 ---
+    function applyEffects(effects) {
+        let offsetY = ch/2 - 100;
+        let hasPositive = false; 
+        let hasNegative = false;
+
+        if (effects) {
+            // 處理能力值
+            const statsMap = {
+                'knowledge': '智慧',
+                'health': '體力',
+                'reputation': '聲望',
+                'bond': '羈絆'
+            };
+
+            for (let key in statsMap) {
+                if (effects[key]) {
+                    player[key] += effects[key];
+                    player[key] = Math.max(0, Math.min(100, player[key])); // 確保在 0-100 之間
+                    
+                    let color = effects[key] >= 0 ? '#4caf50' : '#e74c3c';
+                    floatingTexts.push(new FloatingText(cw/2, offsetY, `${statsMap[key]} ${effects[key] >= 0 ? '+' : ''}${effects[key]}`, color));
+                    offsetY -= 40;
+                    if(effects[key] > 0) hasPositive = true; else hasNegative = true;
+                }
+            }
+
+            // 處理好感度
+            const npcMap = ['maid', 'chef', 'doctor', 'medic'];
+            npcMap.forEach(role => {
+                if (effects[role]) {
+                    let targetChar = player.affections[role];
+                    if (targetChar) {
+                        targetChar.target = Math.max(0, Math.min(targetChar.max, targetChar.target + effects[role])); 
+                        let color = effects[role] >= 0 ? targetChar.color : "#e74c3c";
+                        floatingTexts.push(new FloatingText(cw/2, offsetY, `${targetChar.name} ${effects[role]>=0?'+':''}${effects[role]}`, color));
+                        offsetY -= 40;
+                        if(effects[role] > 0) hasPositive = true; else hasNegative = true;
+                    }
+                }
+            });
+        }
+        
+        if (hasPositive) { bloomIntensity = 1.0; bloomColor = '255,215,0'; } 
+        if (hasNegative) { cameraShake.amount = 12; bloomIntensity = 0.5; bloomColor = '255,0,0'; }
+    }
+
+
+    // --- 答題處理 ---
+    function applyChoice(opt) {
+        mainCharacter.setEmotion(opt.expr || 'normal'); // 如果外部題庫沒有 expr，預設為 normal
+        selectedOptionFeedback = opt.feedback;
+        
+        applyEffects(opt.effects);
+        
+        currentState = STATES.FEEDBACK;
+    }
+
+    function applyFreeAction(actionId) {
+        let offsetY = ch/2 - 100;
+        player.ap -= 1;
+        
+        if (actionId === 'act_study') {
+            player.knowledge += 15; player.health -= 15;
+            floatingTexts.push(new FloatingText(cw/2, offsetY, "智慧 +15", "#4caf50"));
+            floatingTexts.push(new FloatingText(cw/2, offsetY-40, "體力 -15", "#e74c3c"));
+            mainCharacter.setEmotion('normal');
+            selectedOptionFeedback = "您在書閣研讀了一會兒醫書，增長了不少調養知識，但也消耗了些許體力。";
+        } else if (actionId === 'act_rest') {
+            player.health += 25; 
+            floatingTexts.push(new FloatingText(cw/2, offsetY, "體力 +25", "#4caf50"));
+            mainCharacter.setEmotion('happy');
+            selectedOptionFeedback = "您在房內焚香靜坐，閉目養神，感到體力逐漸充沛。";
+        } else if (actionId === 'act_charity') {
+            player.reputation += 15; player.health -= 10;
+            floatingTexts.push(new FloatingText(cw/2, offsetY, "聲望 +15", "#4caf50"));
+            floatingTexts.push(new FloatingText(cw/2, offsetY-40, "體力 -10", "#e74c3c"));
+            mainCharacter.setEmotion('happy');
+            selectedOptionFeedback = "您命人開倉賑濟孤寡，侯府主母的仁善之名在市井間傳開。";
+        } else if (actionId === 'act_baby') {
+            player.bond += 15; player.health -= 10;
+            floatingTexts.push(new FloatingText(cw/2, offsetY, "羈絆 +15", "#4caf50"));
+            floatingTexts.push(new FloatingText(cw/2, offsetY-40, "體力 -10", "#e74c3c"));
+            mainCharacter.setEmotion('happy');
+            selectedOptionFeedback = "您親自為孩兒輕唱搖籃曲，逗弄著他，感受著血脈相連的溫馨。";
+        } else if (actionId === 'act_manage') {
+            player.health -= 15;
+            for(let key in player.affections) { player.affections[key].target += 5; }
+            floatingTexts.push(new FloatingText(cw/2, offsetY, "眾人好感 +5", "#e86f88"));
+            floatingTexts.push(new FloatingText(cw/2, offsetY-40, "體力 -15", "#e74c3c"));
+            mainCharacter.setEmotion('normal');
+            selectedOptionFeedback = "您巡視後宅，恩威並施，仔細過問各處開銷，下人們對您越發恭敬。";
+        }
+        
+        player.health = Math.max(0, Math.min(100, player.health));
+        player.knowledge = Math.max(0, Math.min(100, player.knowledge));
+        player.reputation = Math.max(0, Math.min(100, player.reputation));
+        player.bond = Math.max(0, Math.min(100, player.bond));
+        
+        currentState = STATES.ACTION_RESULT;
+    }
+
+    function generateRandomEvent() {
+        let event = randomEventsPool[Math.floor(Math.random() * randomEventsPool.length)];
+        currentRandomEvent = {
+            text: event.text,
+            feedback: event.apply()
+        };
+        mainCharacter.setEmotion(event.expr);
+        player.health = Math.max(0, Math.min(100, player.health));
+        player.knowledge = Math.max(0, Math.min(100, player.knowledge));
+        player.reputation = Math.max(0, Math.min(100, player.reputation));
+        player.bond = Math.max(0, Math.min(100, player.bond));
+    }
+
+    function determineEnding() {
+        let totalAffection = Object.values(player.affections).reduce((sum, npc) => sum + npc.target, 0);
+        
+        if (player.health < 30) {
+            return { title: "【積勞成疾】", desc: "您日夜操勞，雖然保全了侯府體面，但自己卻落下病根。太醫強烈建議您必須長年臥床休養...", color: "#e74c3c" };
+        }
+        if (player.knowledge >= 80 && player.reputation >= 80 && player.bond >= 80 && totalAffection >= 300) {
+            return { title: "【一代宗婦】", desc: "您完美掌握育兒知識，母子連心，名滿京城且後宅和睦。老夫人直接將掌家之權全權交予您，成為侯府最輝煌的主母典範！", color: "#d4af37" };
+        }
+        if (player.bond >= 85) {
+            return { title: "【母慈子孝】", desc: "您將所有心血傾注在孩兒身上，小少爺與您極為親暱。雖然其他方面表現平平，但這份親情是您最大的收穫。", color: "#f39c12" };
+        }
+        if (player.reputation >= 85) {
+            return { title: "【名望遠播】", desc: "您以外交手段與行善積德聞名，被京城貴婦圈引為佳話。侯府因您的名聲而更加顯赫。", color: "#82c0d9" };
+        }
+        return { title: "【漸入佳境】", desc: "這七日雖有波折，但您與寶寶都在努力適應。來日方長，一切都會越來越好。", color: "#4caf50" };
+    }
+
+    // --- UI 渲染函式 ---
+    function drawGlassPanel(ctx, x, y, w, h) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(12, 16, 24, 0.85)'; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20;
+        ctx.beginPath(); ctx.roundRect(x, y, w, h, 12); ctx.fill(); ctx.shadowBlur = 0;
+        
+        let borderGrad = ctx.createLinearGradient(x, y, x, y+h);
+        borderGrad.addColorStop(0, 'rgba(212, 175, 55, 0.8)'); borderGrad.addColorStop(1, 'rgba(212, 175, 55, 0.2)');
+        ctx.strokeStyle = borderGrad; ctx.lineWidth = 2; ctx.stroke();
+        
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; ctx.beginPath(); ctx.roundRect(x+3, y+3, w-6, h-6, 9); ctx.stroke();
+        ctx.restore();
+    }
+
+    function wrapText(ctx, text, maxWidth) {
+        let words = text.split('');
+        let lines = []; let currentLine = '';
+        for (let i = 0; i < words.length; i++) {
+            let char = words[i];
+            if (char === '\n') { lines.push(currentLine); currentLine = ''; continue; }
+            let testLine = currentLine + char;
+            let metrics = ctx.measureText(testLine);
+            if (metrics.width > maxWidth && currentLine !== '') {
+                lines.push(currentLine); currentLine = char;
+            } else { currentLine = testLine; }
+        }
+        if (currentLine) lines.push(currentLine);
+        return lines;
+    }
+
+    function drawDatePanel(ctx) {
+        let panelW = 260; let panelH = 100;
+        drawGlassPanel(ctx, 20, 20, panelW, panelH);
+        
+        ctx.save();
+        ctx.beginPath(); ctx.arc(65, 70, 32, 0, Math.PI * 2); ctx.clip();
+        ctx.fillStyle = '#121826'; ctx.fill();
+        mainCharacter.draw(ctx, 65, 90, 0.4, true); 
+        ctx.restore();
+        
+        ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 2; 
+        ctx.beginPath(); ctx.arc(65, 70, 32, 0, Math.PI*2); ctx.stroke();
+
+        ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
+        ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.textAlign = 'left'; 
+        ctx.fillText(`【大宋宣和元年】`, 110, 55);
+        ctx.fillStyle = '#e0e0e0'; ctx.font = `18px ${FONT_FAMILY}`; 
+        ctx.fillText(`產後第 ${currentDay} 天`, 120, 85);
+        ctx.shadowBlur = 0;
+    }
+
+    function drawStatsPanel(ctx) {
+        let panelW = 340; let panelX = Math.max(20, cw - panelW - 20);
+        let panelY = 20; let panelH = 460; // 擴充高度
+        drawGlassPanel(ctx, panelX, panelY, panelW, panelH);
+        
+        ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
+        ctx.fillStyle = '#d4af37'; ctx.font = `bold 22px ${FONT_FAMILY}`; ctx.textAlign = 'left';
+        ctx.fillText("【主母狀態】", panelX + 20, panelY + 35); ctx.shadowBlur = 0;
+
+        let drawBar = (label, val, yOffset, color) => {
+            ctx.fillStyle = '#fff'; ctx.font = `18px ${FONT_FAMILY}`; ctx.textAlign = 'left';
+            ctx.fillText(label, panelX + 20, panelY + yOffset);
+            ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.roundRect(panelX + 70, panelY + yOffset - 13, panelW - 90, 12, 6); ctx.fill();
+            ctx.fillStyle = color;
+            ctx.beginPath(); ctx.roundRect(panelX + 70, panelY + yOffset - 13, (val / 100) * (panelW - 90), 12, 6); ctx.fill();
+        };
+
+        drawBar("智慧", player.knowledge, 65, player.knowledge > 30 ? '#4caf50' : '#e74c3c');
+        drawBar("體力", player.health, 95, player.health > 30 ? '#e86f88' : '#e74c3c');
+        drawBar("聲望", player.reputation, 125, player.reputation > 30 ? '#f39c12' : '#e74c3c');
+        drawBar("羈絆", player.bond, 155, player.bond > 30 ? '#82c0d9' : '#e74c3c');
+
+        // 分隔線
+        ctx.strokeStyle = 'rgba(212, 175, 55, 0.3)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(panelX + 10, panelY + 175); ctx.lineTo(panelX + panelW - 10, panelY + 175); ctx.stroke();
+
+        ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`;
+        ctx.fillText("【後宅關係】", panelX + 20, panelY + 205);
+
+        let startY = panelY + 245;
+        for (const key in player.affections) {
+            let stat = player.affections[key];
+            stat.current += (stat.target - stat.current) * 10 * dt;
+            
+            let tierText = "陌生"; let statusColor = '#e0e0e0'; let imgExpr = 'normal';
+            if (stat.target >= 90) { tierText = "★特殊羈絆"; statusColor = '#f39c12'; imgExpr = 'happy'; }
+            else if (stat.target >= 60) { tierText = "信任"; statusColor = '#4caf50'; imgExpr = 'happy'; }
+            else if (stat.target >= 30) { tierText = "熟悉"; statusColor = '#82c0d9'; imgExpr = 'normal'; }
+            else { tierText = "陌生"; statusColor = '#e74c3c'; imgExpr = 'angry'; }
+
+            let npc = npcs[key];
+            if (npc) {
+                npc.setEmotion(imgExpr);
+                ctx.save();
+                ctx.beginPath(); ctx.arc(panelX + 45, startY - 5, 22, 0, Math.PI * 2); ctx.clip();
+                ctx.fillStyle = '#1a1f2e'; ctx.fill();
+                npc.draw(ctx, panelX + 45, startY + 10, 0.3, true);
+                ctx.restore();
+                ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(panelX + 45, startY - 5, 22, 0, Math.PI*2); ctx.stroke();
+            }
+
+            ctx.fillStyle = '#fff'; ctx.font = `16px ${FONT_FAMILY}`; ctx.textAlign = 'left'; 
+            ctx.fillText(`${stat.name}`, panelX + 75, startY - 10);
+            ctx.fillStyle = statusColor; ctx.textAlign = 'right'; ctx.font = `14px ${FONT_FAMILY}`; 
+            ctx.fillText(`[${tierText}]`, panelX + panelW - 20, startY - 10);
+            
+            ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.roundRect(panelX + 75, startY + 5, panelW - 95, 6, 3); ctx.fill();
+            ctx.fillStyle = stat.color; 
+            let barWidth = Math.max(0, (stat.current / stat.max) * (panelW - 95));
+            ctx.beginPath(); ctx.roundRect(panelX + 75, startY + 5, barWidth, 6, 3); ctx.fill(); 
+            ctx.shadowColor = stat.color; ctx.shadowBlur = 8; ctx.beginPath(); ctx.roundRect(panelX + 75, startY + 5, barWidth, 6, 3); ctx.fill(); ctx.shadowBlur = 0;
+            startY += 50;
+        }
+    }
+
+    function drawButton(ctx, id, btn, text) {
+        let hover = (mouse.x >= btn.x && mouse.x <= btn.x + btn.w && mouse.y >= btn.y && mouse.y <= btn.y + btn.h);
+        
+        let scale = 1;
+        if (hover) {
+            scale = mouse.isDown ? 0.95 : 1.02;
+            canvas.style.cursor = 'pointer';
+        }
+
+        ctx.save();
+        ctx.translate(btn.x + btn.w/2, btn.y + btn.h/2);
+        ctx.scale(scale, scale);
+        
+        let bgGrad = ctx.createLinearGradient(0, -btn.h/2, 0, btn.h/2);
+        if (hover) {
+            bgGrad.addColorStop(0, 'rgba(212, 175, 55, 0.4)'); bgGrad.addColorStop(1, 'rgba(150, 110, 20, 0.2)');
+            ctx.shadowColor = 'rgba(212, 175, 55, 0.6)'; ctx.shadowBlur = 15; 
+        } else {
+            bgGrad.addColorStop(0, 'rgba(30, 35, 45, 0.9)'); bgGrad.addColorStop(1, 'rgba(15, 18, 25, 0.9)');
+        }
+        ctx.fillStyle = bgGrad; ctx.beginPath(); ctx.roundRect(-btn.w/2, -btn.h/2, btn.w, btn.h, 8); ctx.fill();
+        ctx.strokeStyle = hover ? '#fff' : '#d4af37'; ctx.lineWidth = hover ? 2 : 1; ctx.stroke();
+        
+        ctx.fillStyle = hover ? '#fff' : '#d4af37'; ctx.font = `20px ${FONT_FAMILY}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        
+        let lines = wrapText(ctx, text, btn.w - 30);
+        let startY = -((lines.length - 1) * 12);
+        lines.forEach((l, i) => { ctx.fillText(l, 0, startY + i * 24); });
+        ctx.restore();
+        
+        clickZones.push({ id: id, ...btn });
+    }
+
+    function renderDialog(ctx, titleText, contentText, options = null) {
+        let padding = 30;
+        let boxW = Math.min(800, cw - 40);
+        let boxX = cw / 2 - boxW / 2;
+
+        ctx.font = `22px ${FONT_FAMILY}`;
+        let contentLines = wrapText(ctx, contentText, boxW - padding * 2);
+        let contentH = contentLines.length * 34;
+
+        let btnHs = []; let totalBtnH = 0;
+        if (options) {
+            ctx.font = `20px ${FONT_FAMILY}`;
+            btnHs = options.map(opt => wrapText(ctx, opt.text, boxW - padding * 2 - 30).length * 24 + 30);
+            totalBtnH = btnHs.reduce((a,b)=>a+b, 0) + (options.length) * 15;
+        }
+
+        let boxH = padding * 2 + contentH + (options ? totalBtnH + 10 : 30);
+        let boxY = ch - boxH - 20;
+
+        drawGlassPanel(ctx, boxX, boxY, boxW, boxH);
+
+        if (titleText) {
+            ctx.save();
+            ctx.font = `bold 22px ${FONT_FAMILY}`;
+            let titleW = ctx.measureText(titleText).width + 50;
+            let titleH = 40; let titleX = boxX + 20; let titleY = boxY - titleH / 2; 
+            ctx.fillStyle = 'rgba(212, 175, 55, 0.95)'; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 6;
+            ctx.beginPath(); ctx.roundRect(titleX, titleY, titleW, titleH, 6); ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            ctx.shadowBlur = 0; ctx.fillStyle = '#05070a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(titleText, titleX + titleW / 2, titleY + titleH / 2);
+            ctx.restore();
+        }
+
+        ctx.font = `22px ${FONT_FAMILY}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
+        
+        let currY = boxY + padding;
+        contentLines.forEach(line => {
+            if(line.includes("【調養小記】") || line.includes("【隱藏事件") || line.includes("【特殊羈絆")) ctx.fillStyle = '#f39c12';
+            else ctx.fillStyle = '#f0f0f0';
+            ctx.fillText(line, boxX + padding, currY);
+            currY += 34;
+        });
+        ctx.shadowBlur = 0;
+
+        if (options) {
+            currY += 10;
+            let btnW = boxW - padding * 2; let btnX = boxX + padding;
+            options.forEach((opt, idx) => {
+                let h = btnHs[idx];
+                drawButton(ctx, `opt_${idx}`, {x: btnX, y: currY, w: btnW, h: h}, opt.text);
+                currY += h + 15;
+            });
+        } else {
+            ctx.globalAlpha = (Math.sin(time * 5) + 1) * 0.5;
+            ctx.fillStyle = '#d4af37'; ctx.textAlign = 'right'; ctx.font = `bold 18px ${FONT_FAMILY}`; ctx.textBaseline = 'bottom';
+            ctx.fillText("▼ 點擊繼續", boxX + boxW - 20, boxY + boxH - 15);
+            ctx.globalAlpha = 1.0;
+            clickZones.push({ id: 'screen_next', x: 0, y: 0, w: cw, h: ch });
+        }
+    }
+
+    function triggerSummon(roleId) {
+        if(activePools[roleId] && activePools[roleId].length > 0) {
+            currentStage = activePools[roleId].pop();
+            mainCharacter.resetAppearance();
+        } else {
+            let npcName = player.affections[roleId].name;
+            currentStage = {
+                character: npcName,
+                story: ["「夫人喚微臣/奴婢前來，可是身子有些勞累？產後多休息，保持心情愉悅是最好的調養喔。」"],
+                question: "面對下人的貼心問候，您打算？",
+                options: shuffle([
+                    { text: "微笑點頭，詢問今日少爺的照護狀況。", feedback: "大家都為夫人的溫和明理感到如沐春風。", expr: 'happy', effects: { [roleId]: 15 } },
+                    { text: "覺得有些疲倦，點點頭讓他們先下去忙吧。", feedback: "大家體諒夫人產後虛弱，輕聲告退讓您好好歇息。", expr: 'normal', effects: { [roleId]: 5 } }
+                ])
+            };
+        }
+        currentStoryLine = 0;
+        currentState = STATES.STORY;
+    }
+
+    function drawSceneBackground(ctx) {
+        let dayInfo = daysData[Math.min(currentDay - 1, daysData.length - 1)];
+        let loc = dayInfo.location;
+        let grad = ctx.createLinearGradient(0, 0, 0, ch);
+        
+        if (loc.includes('正房') || loc.includes('臥房')) {
+            grad.addColorStop(0, '#2a1a1f'); grad.addColorStop(1, '#1a0a0f');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
+            ctx.fillStyle = 'rgba(212, 175, 55, 0.03)';
+            ctx.fillRect(cw*0.1, ch*0.2, cw*0.3, ch*0.6); ctx.fillRect(cw*0.6, ch*0.2, cw*0.3, ch*0.6);
+            ctx.strokeStyle = 'rgba(212, 175, 55, 0.1)'; ctx.lineWidth = 4;
+            ctx.strokeRect(cw*0.1, ch*0.2, cw*0.3, ch*0.6); ctx.strokeRect(cw*0.6, ch*0.2, cw*0.3, ch*0.6);
+        } else if (loc.includes('花園')) {
+            grad.addColorStop(0, '#101820'); grad.addColorStop(1, '#1a2b3c');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
+            ctx.fillStyle = 'rgba(255, 255, 220, 0.8)'; ctx.shadowColor = '#ffefa0'; ctx.shadowBlur = 50;
+            ctx.beginPath(); ctx.arc(cw*0.8, ch*0.2, Math.min(cw,ch)*0.1, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+            ctx.fillStyle = '#0a1015';
+            ctx.beginPath(); ctx.moveTo(0, ch); ctx.lineTo(0, ch*0.6);
+            ctx.quadraticCurveTo(cw*0.3, ch*0.4, cw*0.6, ch*0.7); ctx.quadraticCurveTo(cw*0.8, ch*0.6, cw, ch*0.8);
+            ctx.lineTo(cw, ch); ctx.fill();
+        } else if (loc.includes('膳房')) {
+            grad.addColorStop(0, '#1a1005'); grad.addColorStop(1, '#2a1005');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
+            let fire = ctx.createRadialGradient(cw/2, ch, 0, cw/2, ch, ch*0.8);
+            fire.addColorStop(0, 'rgba(255, 100, 0, 0.15)'); fire.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = fire; ctx.fillRect(0, 0, cw, ch);
+        } else if (loc.includes('書閣') || loc.includes('暖閣')) {
+            grad.addColorStop(0, '#10151a'); grad.addColorStop(1, '#0a0d14');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            for(let i=0; i<5; i++) { ctx.fillRect(0, ch*0.2 + i*ch*0.15, cw, ch*0.02); }
+        } else {
+            grad.addColorStop(0, '#151b29'); grad.addColorStop(1, '#05070a');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
+        }
+    }
+
+    function gameLoop(timestamp) {
+        dt = (timestamp - lastTime) / 1000 || 0;
+        lastTime = timestamp; time += dt;
+
+        mouse.x += (mouse.targetX - mouse.x) * 10 * dt; mouse.y += (mouse.targetY - mouse.y) * 10 * dt;
+        if (cameraShake.amount > 0.1) {
+            cameraShake.x = (Math.random() - 0.5) * cameraShake.amount; cameraShake.y = (Math.random() - 0.5) * cameraShake.amount;
+            cameraShake.amount *= 0.9;
+        } else { cameraShake.x = 0; cameraShake.y = 0; }
+
+        ctx.save();
+        ctx.scale(dpr, dpr); 
+        ctx.translate(cameraShake.x, cameraShake.y);
+
+        if (currentState === STATES.DAY_TRANSITION || currentState === STATES.START || currentState === STATES.END) {
+            globalAlpha += (1 - globalAlpha) * dt * 2;
+        } else {
+            globalAlpha = 1;
+        }
+        ctx.globalAlpha = globalAlpha;
+
+        drawSceneBackground(ctx);
+
+        ctx.globalCompositeOperation = 'screen';
+        dustParticles.forEach(p => { p.update(dt); p.draw(ctx); });
+        ctx.globalCompositeOperation = 'source-over';
+
+        mainCharacter.update(dt);
+        Object.values(npcs).forEach(npc => npc.update(dt));
+        
+        let activeCharacter = mainCharacter;
+        // 如果是載入中，不畫角色
+        if (currentState !== STATES.LOADING) {
+            if (currentState === STATES.STORY || currentState === STATES.QUESTION || currentState === STATES.FEEDBACK) {
+                let stage = currentStage || introStage;
+                let charName = stage.character || "";
+                if (charName.includes("春桃")) activeCharacter = npcs.maid;
+                else if (charName.includes("總管")) activeCharacter = npcs.chef;
+                else if (charName.includes("張大人") || charName.includes("太醫")) activeCharacter = npcs.doctor;
+                else if (charName.includes("蘇氏") || charName.includes("醫女")) activeCharacter = npcs.medic;
+            } else if (currentState === STATES.INTERACT_CHOICE || currentState === STATES.MORNING_ACTION || currentState === STATES.RANDOM_EVENT || currentState === STATES.HIDDEN_EVENT || currentState === STATES.ACTION_RESULT) {
+                activeCharacter = mainCharacter;
+            }
+
+            if (currentState !== STATES.DAY_TRANSITION && currentState !== STATES.START && currentState !== STATES.END) {
+                let charScale = Math.max(1.0, Math.min(cw/600, ch/800) * 2.2);
+                activeCharacter.draw(ctx, cw/2, ch/2 + 100, charScale);
+            }
+        }
+
+        clickZones = [];
+        canvas.style.cursor = 'crosshair'; 
+
+        if (currentState === STATES.LOADING) {
+             ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0,0,cw,ch);
+             ctx.textAlign = 'center'; ctx.fillStyle = '#d4af37'; ctx.font = `bold 30px ${FONT_FAMILY}`; 
+             ctx.fillText("載入題庫中...", cw/2, ch/2);
+        }
+        else if (currentState === STATES.START) {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,cw,ch);
+            ctx.textAlign = 'center'; ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 20;
+            ctx.fillStyle = '#fff'; 
+            let titleSize = Math.max(30, Math.min(60, cw * 0.08));
+            ctx.font = `bold ${titleSize}px ${FONT_FAMILY}`; ctx.fillText("汴京娘子調養記", cw/2, ch/2 - 100); ctx.shadowBlur = 0;
+            ctx.fillStyle = '#d4af37'; ctx.font = `${titleSize*0.45}px ${FONT_FAMILY}`; ctx.fillText("— 深度決策 RPG 升級版 —", cw/2, ch/2 - 40);
+            drawButton(ctx, 'btn_start', {x: cw/2 - 100, y: ch/2 + 80, w: 200, h: 60}, "進入侯府");
+        }
+        else if (currentState === STATES.DAY_TRANSITION) {
+            ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0,0,cw,ch);
+            let dayInfo = daysData[Math.min(currentDay - 1, daysData.length - 1)];
+            
+            ctx.textAlign = 'center';
+            ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 15;
+            ctx.fillStyle = '#d4af37'; ctx.font = `bold 46px ${FONT_FAMILY}`; 
+            ctx.fillText(`產後第 ${currentDay} 天`, cw/2, ch/2 - 80); ctx.shadowBlur = 0;
+            
+            ctx.fillStyle = '#e0e0e0'; ctx.font = `24px ${FONT_FAMILY}`;
+            let lines = wrapText(ctx, dayInfo.event, Math.min(600, cw - 60));
+            lines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 10 + i*34));
+            
+            ctx.globalAlpha = (Math.sin(time * 5) + 1) * 0.5 * globalAlpha;
+            ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; 
+            ctx.fillText("▼ 點擊開啟今日日程 ▼", cw/2, ch/2 + 150);
+            ctx.globalAlpha = globalAlpha;
+            clickZones.push({ id: 'screen_next_day', x: 0, y: 0, w: cw, h: ch });
+        }
+        else if (currentState === STATES.FREE_ACTION) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            let boxW = Math.min(800, cw - 40); let boxX = cw / 2 - boxW / 2;
+            let boxY = ch - 340;
+            drawGlassPanel(ctx, boxX, boxY, boxW, 320);
+            
+            ctx.save();
+            ctx.fillStyle = '#d4af37'; ctx.font = `bold 22px ${FONT_FAMILY}`; ctx.textAlign = 'center';
+            ctx.fillText(`【自由行動】今日剩餘行動次數：${player.ap}`, cw/2, boxY + 40);
+            ctx.restore();
+
+            let btnW = Math.min(320, boxW/2 - 40);
+            drawButton(ctx, 'act_study',   {x: cw/2 - btnW - 10, y: boxY + 70, w: btnW, h: 55}, "研讀醫書 (升智慧，耗體力)");
+            drawButton(ctx, 'act_rest',    {x: cw/2 + 10,        y: boxY + 70, w: btnW, h: 55}, "靜心休養 (大回體力)");
+            drawButton(ctx, 'act_charity', {x: cw/2 - btnW - 10, y: boxY + 145, w: btnW, h: 55}, "施粥行善 (升聲望，耗體力)");
+            drawButton(ctx, 'act_baby',    {x: cw/2 + 10,        y: boxY + 145, w: btnW, h: 55}, "陪伴孩兒 (升羈絆，耗體力)");
+            drawButton(ctx, 'act_manage',  {x: cw/2 - btnW/2,    y: boxY + 220, w: btnW, h: 55}, "巡視後宅 (全好感升，耗體力)");
+        }
+        else if (currentState === STATES.ACTION_RESULT) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            renderDialog(ctx, "行動結果", selectedOptionFeedback, null);
+        }
+        else if (currentState === STATES.RANDOM_EVENT) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            renderDialog(ctx, "突發事件", currentRandomEvent.text + "\n\n" + currentRandomEvent.feedback, null);
+        }
+        else if (currentState === STATES.HIDDEN_EVENT) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            renderDialog(ctx, "隱藏事件觸發！", currentHiddenEvent.text + "\n\n" + currentHiddenEvent.feedback, null);
+        }
+        else if (currentState === STATES.INTERACT_CHOICE) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            let boxW = Math.min(800, cw - 40); let boxX = cw / 2 - boxW / 2;
+            let boxY = ch - 260;
+            drawGlassPanel(ctx, boxX, boxY, boxW, 240);
+            
+            ctx.save();
+            ctx.fillStyle = '#d4af37'; ctx.font = `bold 22px ${FONT_FAMILY}`; ctx.textAlign = 'center';
+            ctx.fillText("今日趁著孩兒安穩睡去，夫人打算找誰商議調理細節？", cw/2, boxY + 40);
+            ctx.restore();
+
+            let btnW = Math.min(320, boxW/2 - 40);
+            drawButton(ctx, 'call_maid', {x: cw/2 - btnW - 10, y: boxY + 70, w: btnW, h: 55}, "傳召【丫鬟 春桃】");
+            drawButton(ctx, 'call_chef', {x: cw/2 + 10, y: boxY + 70, w: btnW, h: 55}, "詢問【膳房 總管】");
+            drawButton(ctx, 'call_doctor', {x: cw/2 - btnW - 10, y: boxY + 145, w: btnW, h: 55}, "向【太醫 張大人】請安");
+            drawButton(ctx, 'call_medic', {x: cw/2 + 10, y: boxY + 145, w: btnW, h: 55}, "與【醫女 蘇氏】切磋醫理");
+        }
+        else if (currentState === STATES.STORY) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            let stage = currentStage;
+            renderDialog(ctx, stage.character, stage.story[currentStoryLine], null);
+        }
+        else if (currentState === STATES.QUESTION) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            let stage = currentStage;
+            renderDialog(ctx, stage.character || "請夫人定奪", stage.question, stage.options);
+        }
+        else if (currentState === STATES.FEEDBACK) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            renderDialog(ctx, "調理結果", selectedOptionFeedback, null);
+        }
+        else if (currentState === STATES.END) {
+            ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0,0,cw,ch);
+            ctx.textAlign = 'center'; 
+            ctx.fillStyle = currentEnding.color; ctx.font = `bold 46px ${FONT_FAMILY}`; ctx.fillText(currentEnding.title, cw/2, ch/2 - 120);
+            
+            ctx.fillStyle = '#fff'; ctx.font = `20px ${FONT_FAMILY}`; 
+            let endLines = wrapText(ctx, currentEnding.desc, Math.min(600, cw - 60));
+            endLines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 50 + i*30));
+
+            ctx.fillStyle = '#d4af37'; ctx.font = `18px ${FONT_FAMILY}`;
+            ctx.fillText(`結算：智慧 ${player.knowledge} | 體力 ${player.health} | 聲望 ${player.reputation} | 羈絆 ${player.bond}`, cw/2, ch/2 + 60);
+
+            drawButton(ctx, 'btn_restart', {x: cw/2 - 100, y: ch/2 + 100, w: 200, h: 60}, "重新體驗");
+        }
+
+        floatingTexts = floatingTexts.filter(t => t.life > 0); floatingTexts.forEach(t => { t.update(); t.draw(ctx); });
+
+        if (bloomIntensity > 0) {
+            ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = `rgba(${bloomColor}, ${bloomIntensity * 0.4})`;
+            ctx.fillRect(0, 0, cw, ch); bloomIntensity -= dt * 2; ctx.globalCompositeOperation = 'source-over';
+        }
+
+        ctx.restore();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function proceedToDailyContent() {
+        if (currentDay === 1) { currentStage = introStage; mainCharacter.resetAppearance(); currentState = STATES.STORY; }
+        else if (currentDay === 3) { currentStage = originStage; mainCharacter.resetAppearance(); currentState = STATES.STORY; }
+        else { mainCharacter.resetAppearance(); currentState = STATES.INTERACT_CHOICE; }
+    }
+
+    function handleInteraction(cx, cy) {
+        let clicked = clickZones.find(z => cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h);
+        
+        if (currentState === STATES.START && clicked && clicked.id === 'btn_start') {
+            resetPools(); currentDay = 1; globalAlpha = 0; currentState = STATES.DAY_TRANSITION;
+        }
+        else if (currentState === STATES.DAY_TRANSITION && clicked && clicked.id === 'screen_next_day') {
+            player.ap = 3; currentState = STATES.FREE_ACTION;
+        }
+        else if (currentState === STATES.FREE_ACTION && clicked && clicked.id.startsWith('act_')) {
+            applyFreeAction(clicked.id);
+        }
+        else if (currentState === STATES.ACTION_RESULT && clicked && clicked.id === 'screen_next') {
+            if (player.ap > 0) {
+                currentState = STATES.FREE_ACTION;
+            } else {
+                if (Math.random() < 0.4) { 
+                    generateRandomEvent();
+                    currentState = STATES.RANDOM_EVENT;
+                } else if (triggerHiddenEvent()) {
+                    currentState = STATES.HIDDEN_EVENT;
+                } else {
+                    proceedToDailyContent();
+                }
+            }
+        }
+        else if (currentState === STATES.RANDOM_EVENT && clicked && clicked.id === 'screen_next') {
+            if (triggerHiddenEvent()) {
+                currentState = STATES.HIDDEN_EVENT;
+            } else {
+                proceedToDailyContent();
+            }
+        }
+        else if (currentState === STATES.HIDDEN_EVENT && clicked && clicked.id === 'screen_next') {
+            proceedToDailyContent();
+        }
+        else if (currentState === STATES.INTERACT_CHOICE && clicked && clicked.id.startsWith('call_')) {
+            let role = clicked.id.split('_')[1];
+            triggerSummon(role);
+        }
+        else if (currentState === STATES.STORY && clicked && clicked.id === 'screen_next') {
+            currentStoryLine++;
+            if (currentStoryLine >= currentStage.story.length) currentState = STATES.QUESTION;
+        }
+        else if (currentState === STATES.QUESTION && clicked && clicked.id.startsWith('opt_')) {
+            let idx = parseInt(clicked.id.split('_')[1]);
+            applyChoice(currentStage.options[idx]);
+        }
+        else if (currentState === STATES.FEEDBACK && clicked && clicked.id === 'screen_next') {
+            currentDay++; currentStoryLine = 0;
+            if (currentDay > 7) { 
+                currentEnding = determineEnding();
+                globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy');
+            } else {
+                globalAlpha = 0; currentState = STATES.DAY_TRANSITION;
+            }
+        }
+        else if (currentState === STATES.END && clicked && clicked.id === 'btn_restart') {
+            currentDay = 1; 
+            player.knowledge = 50; player.health = 80; player.reputation = 50; player.bond = 50;
+            resetPools();
+            for(let key in player.affections) { player.affections[key].target = 20; player.affections[key].current = 20; player.affections[key].status = "陌生"; }
+            hiddenEventsPool.forEach(ev => ev.triggered = false);
+            globalAlpha = 0; currentState = STATES.DAY_TRANSITION;
+        }
+    }
+
+    canvas.addEventListener('mousedown', e => {
+        mouse.isDown = true;
+    });
+    canvas.addEventListener('mouseup', e => {
+        mouse.isDown = false;
+        if (currentState !== STATES.LOADING) {
+            let rect = canvas.getBoundingClientRect();
+            handleInteraction((e.clientX - rect.left) * (cw / rect.width), (e.clientY - rect.top) * (ch / rect.height));
+        }
+    });
+    
+    canvas.addEventListener('touchstart', e => { 
+        e.preventDefault(); 
+        mouse.isDown = true;
+        let rect = canvas.getBoundingClientRect();
+        let cx = (e.touches[0].clientX - rect.left) * (cw / rect.width);
+        let cy = (e.touches[0].clientY - rect.top) * (ch / rect.height);
+        mouse.targetX = cx; mouse.targetY = cy;
+    }, {passive: false});
+    canvas.addEventListener('touchend', e => {
+        mouse.isDown = false;
+        if (currentState !== STATES.LOADING) {
+            handleInteraction(mouse.targetX, mouse.targetY);
+        }
+    });
+
+</script>
+</body>
+</html>
