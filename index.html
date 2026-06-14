@@ -41,6 +41,19 @@
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d', { alpha: false }); 
 
+    // 加入 roundRect Polyfill 以防舊版瀏覽器不支援而導致無畫面
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+        CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+            r = r || 0;
+            this.moveTo(x + r, y);
+            this.arcTo(x + w, y, x + w, y + h, r);
+            this.arcTo(x + w, y + h, x, y + h, r);
+            this.arcTo(x, y + h, x, y, r);
+            this.arcTo(x, y, x + w, y, r);
+            return this;
+        };
+    }
+
     const FONT_FAMILY = '"Kaiti", "標楷體", "Times New Roman", serif';
 
     // 自適應滿版系統
@@ -108,12 +121,15 @@
         { day: "產後第七天", weather: "sunny", location: "侯府花園", event: "轉眼已至第七日，您在大家的陪伴下，即將迎來最終的考驗與蛻變。" }
     ];
 
+    // 替換陣列解構，避免不相容的 Syntax Error
     function shuffle(array) {
-        let currentIndex = array.length, randomIndex;
+        let currentIndex = array.length, randomIndex, temp;
         while (currentIndex !== 0) {
             randomIndex = Math.floor(Math.random() * currentIndex);
             currentIndex--;
-            [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+            temp = array[currentIndex];
+            array[currentIndex] = array[randomIndex];
+            array[randomIndex] = temp;
         }
         return array;
     }
@@ -174,9 +190,9 @@
         let doctorPool = pool.filter(q => q.character && (q.character.includes('太醫') || q.character.includes('張大人')));
         let medicPool = pool.filter(q => q.character && (q.character.includes('醫女') || q.character.includes('蘇氏')));
 
-        // 防呆分配
+        // 防呆分配：移除展開運算子 (...) 改用 .slice()
         if(maidPool.length === 0 && chefPool.length === 0 && doctorPool.length === 0 && medicPool.length === 0) {
-            let shuffled = shuffle([...pool]);
+            let shuffled = shuffle(pool.slice());
             let chunk = Math.max(1, Math.floor(shuffled.length / 4));
             maidPool = shuffled.slice(0, chunk);
             chefPool = shuffled.slice(chunk, chunk*2);
@@ -190,11 +206,12 @@
         if(doctorPool.length === 0) doctorPool = [fallbackQuestions.find(q=>q.character && q.character.includes('太醫')) || fallbackQuestions[2]];
         if(medicPool.length === 0) medicPool = [fallbackQuestions.find(q=>q.character && q.character.includes('醫女')) || fallbackQuestions[3]];
 
+        // 使用 .slice() 複製陣列，徹底避免使用展開運算子產生的 Syntax Error
         activePools = { 
-            maid: shuffle([...maidPool]), 
-            chef: shuffle([...chefPool]), 
-            doctor: shuffle([...doctorPool]), 
-            medic: shuffle([...medicPool]) 
+            maid: shuffle(maidPool.slice()), 
+            chef: shuffle(chefPool.slice()), 
+            doctor: shuffle(doctorPool.slice()), 
+            medic: shuffle(medicPool.slice()) 
         };
     }
 
@@ -209,7 +226,8 @@
             }
         } catch (error) {
             console.warn("無法載入外部題庫 (可能在本地 file:// 環境下)，自動切換至內建備用題庫。", error);
-            externalQuestions = [...fallbackQuestions];
+            // 使用 .slice() 避免展開運算子
+            externalQuestions = fallbackQuestions.slice();
         } finally {
             resetPools(); // 確保必定執行
             currentState = STATES.START; // 解除 LOADING 鎖定
@@ -243,7 +261,7 @@
         ]
     };
 
-    // 每日危機事件池 (必須在全域正確宣告)
+    // 每日危機事件池 
     const crisisPool = [
         {
             isCrisis: true,
@@ -277,7 +295,8 @@
         }
     ];
 
-    let activeCrisis = shuffle([...crisisPool]); // 確保 activeCrisis 有被初始化
+    // 移除展開運算子
+    let activeCrisis = shuffle(crisisPool.slice());
 
     const randomEventsPool = [
         { text: "小少爺看著您咿呀學語，似乎認出了娘親，笑得格外開心。", apply: () => { player.bond += 10; return "羈絆提升 (+10)"; }, expr: 'happy' },
@@ -683,26 +702,6 @@
         medic: new ProceduralLive2DCharacter('medic', { skinBase: '#fae3d9', skinShadow: '#d9a896', skinHighlight: '#fff1ec', hairDark: '#1a242c', hairLight: '#3a4a56', silkBase: '#6a9ab0', silkShadow: '#365b6e', goldTrim: null })
     };
 
-    class DustParticleVisuals {
-        constructor() {
-            this.x = Math.random() * cw; this.y = Math.random() * ch;
-            this.size = Math.random() * 2 + 0.5;
-            this.vx = (Math.random() - 0.5) * 0.5; this.vy = (Math.random() - 0.5) * 0.5 - 0.2;
-            this.life = Math.random() * Math.PI * 2;
-        }
-        update(dt) {
-            this.x += this.vx + Math.sin(time + this.life) * 0.5; this.y += this.vy; this.life += dt;
-            if (this.y < 0) this.y = ch; if (this.x < 0) this.x = cw; if (this.x > cw) this.x = 0;
-        }
-        draw(ctx) {
-            let alpha = (Math.sin(this.life * 2) + 1) * 0.3;
-            ctx.fillStyle = `rgba(255, 220, 150, ${alpha})`;
-            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
-        }
-    }
-    let dustVisuals = [];
-    for(let i=0; i<40; i++) dustVisuals.push(new DustParticleVisuals());
-
     let floatingTexts = [];
     class FloatingText {
         constructor(x, y, text, color) {
@@ -978,7 +977,7 @@
         lines.forEach((l, i) => { ctx.fillText(l, 0, startY + i * 24); });
         ctx.restore();
         
-        clickZones.push({ id: id, ...btn });
+        clickZones.push({ id: id, x: btn.x, y: btn.y, w: btn.w, h: btn.h });
     }
 
     function renderDialog(ctx, titleText, contentText, options = null) {
@@ -1106,14 +1105,13 @@
         drawSceneBackground(ctx);
 
         ctx.globalCompositeOperation = 'screen';
-        dustVisuals.forEach(p => { p.update(dt); p.draw(ctx); });
+        dustParticles.forEach(p => { p.update(dt); p.draw(ctx); });
         ctx.globalCompositeOperation = 'source-over';
 
         mainCharacter.update(dt);
         Object.values(npcs).forEach(npc => npc.update(dt));
         
         let activeCharacter = mainCharacter;
-        // 如果是載入中，不畫角色
         if (currentState !== STATES.LOADING) {
             if (currentState === STATES.STORY || currentState === STATES.QUESTION || currentState === STATES.FEEDBACK) {
                 let stage = currentStage || introStage;
@@ -1309,7 +1307,23 @@
         }
         else if (currentState === STATES.INTERACT_CHOICE && clicked && clicked.id.startsWith('call_')) {
             let role = clicked.id.split('_')[1];
-            triggerSummon(role);
+            if(activePools[role] && activePools[role].length > 0) {
+                currentStage = activePools[role].pop();
+            } else {
+                let npcName = player.affections[role].name;
+                currentStage = {
+                    character: npcName,
+                    story: ["「夫人喚微臣/奴婢前來，可是身子有些勞累？產後多休息，保持心情愉悅是最好的調養喔。」"],
+                    question: "面對下人的貼心問候，您打算？",
+                    options: shuffle([
+                        { text: "微笑點頭，詢問今日少爺的照護狀況。", feedback: "大家都為夫人的溫和明理感到如沐春風。", val: 15, expr: 'happy', effects: { [role]: 15 } },
+                        { text: "覺得有些疲倦，點點頭讓他們先下去忙吧。", feedback: "大家體諒夫人產後虛弱，輕聲告退讓您好好歇息。", val: 5, expr: 'normal', effects: { [role]: 5 } }
+                    ])
+                };
+            }
+            mainCharacter.resetAppearance();
+            currentStoryLine = 0;
+            currentState = STATES.STORY;
         }
         else if (currentState === STATES.STORY && clicked && clicked.id === 'screen_next') {
             currentStoryLine++;
