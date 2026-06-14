@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>汴京娘子調養記 - AAA Cinematic Edition</title>
+    <title>汴京娘子調養記 - 劇情沉浸版</title>
     <style>
         body {
             margin: 0;
@@ -38,31 +38,12 @@
 </div>
 
 <script>
-    // --- 1. 檢查 Canvas 是否成功取得與建立 ---
     const canvas = document.getElementById('gameCanvas');
-    // 修復: 移除 { alpha: false } 避免在某些 WebView/行動裝置瀏覽器造成渲染層全黑失效
-    const ctx = canvas ? canvas.getContext('2d') : null; 
-
-    if (canvas && ctx) {
-        console.log("Canvas初始化成功", canvas.width, canvas.height);
-    } else {
-        console.error("Canvas初始化失敗！找不到元件或無法建立 Context。");
-    }
-
-    if (!CanvasRenderingContext2D.prototype.roundRect) {
-        CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
-            r = r || 0;
-            this.moveTo(x + r, y);
-            this.arcTo(x + w, y, x + w, y + h, r);
-            this.arcTo(x + w, y + h, x, y + h, r);
-            this.arcTo(x, y + h, x, y, r);
-            this.arcTo(x, y, x + w, y, r);
-            return this;
-        };
-    }
+    const ctx = canvas.getContext('2d', { alpha: false }); 
 
     const FONT_FAMILY = '"Kaiti", "標楷體", "Times New Roman", serif';
 
+    // 自適應滿版系統
     let dpr = window.devicePixelRatio || 1;
     let cw = window.innerWidth;
     let ch = window.innerHeight;
@@ -70,27 +51,20 @@
     function resize() {
         cw = window.innerWidth;
         ch = window.innerHeight;
-        if(canvas) {
-            canvas.width = cw * dpr;
-            canvas.height = ch * dpr;
-        }
+        canvas.width = cw * dpr;
+        canvas.height = ch * dpr;
     }
     window.addEventListener('resize', resize);
     resize();
 
-    const STATES = { START: 0, DAY_TRANSITION: 1, FREE_ACTION: 2, ACTION_RESULT: 3, RANDOM_EVENT: 4, HIDDEN_EVENT: 5, INTERACT_CHOICE: 6, STORY: 7, QUESTION: 8, FEEDBACK: 9, END: 10, LOADING: 11 };
-    
-    // --- 4. 檢查目前 currentState 初始值 ---
+    // 遊戲狀態機 (簡化為明快的劇情流)
+    const STATES = { LOADING: 0, START: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6 };
     let currentState = STATES.LOADING; 
-    console.log("目前初始狀態設定為:", currentState, "(預期為 11: LOADING)");
-
     let currentDay = 1;
     let currentStage = null;
     let currentStoryLine = 0;
     let selectedOptionFeedback = "";
     
-    let dailyFlags = { crisisDone: false, randomDone: false, hiddenDone: false };
-
     let mouse = { x: cw/2, y: ch/2, targetX: cw/2, targetY: ch/2, isDown: false };
     let time = 0, dt = 0, lastTime = 0;
     let clickZones = []; 
@@ -100,12 +74,12 @@
     let bloomColor = '255,255,255';
     let globalAlpha = 1; 
     
+    // 玩家屬性系統
     let player = { 
         knowledge: 50,    
-        health: 80,       
+        health: 60,  // 剛生完孩子，初始體力較低     
         reputation: 50,   
         bond: 50,         
-        ap: 3,            
         routes: { virtue: 0, power: 0, medical: 0, family: 0 }, 
         affections: {
             maid: { name: "丫鬟 春桃", current: 20, target: 20, max: 100, color: "#e86f88", status: "陌生" },
@@ -115,18 +89,17 @@
         }
     };
 
-    let currentRandomEvent = null;
-    let currentHiddenEvent = null;
     let currentEnding = null;
 
+    // --- 7日主線劇情排程 ---
     const daysData = [
-        { day: "產後第一天", weather: "sunny", location: "華麗正房", event: "初為人母，您抱著剛出生的孩兒，心中充滿溫暖。大宋的陽光和煦，是個好兆頭。" },
-        { day: "產後第二天", weather: "cloudy", location: "侯府花園", event: "天色微陰。小少爺的哭聲劃破了寧靜，新手母親與下人們共同努力照護。" },
-        { day: "產後第三天", weather: "rainy", location: "侯府正廳", event: "窗外下起淅瀝小雨。今日似乎有來自府外的特別關切與愛護。" }, 
-        { day: "產後第四天", weather: "snowy", location: "雅致書閣", event: "氣溫驟降，飛雪連天。隨著奶水自然分泌，您的雙乳感到沉重與奇妙的變化。" },
-        { day: "產後第五天", weather: "sunny", location: "膳房外廂", event: "大雪初霽。看著寶寶喝奶，大家都在為夫人的發奶膳食出謀劃策。" },
-        { day: "產後第六天", weather: "cloudy", location: "華麗正房", event: "夜裡微風徐徐。寶寶頻繁的討奶需要考驗著您的溫柔與耐性。" },
-        { day: "產後第七天", weather: "sunny", location: "侯府花園", event: "轉眼已至第七日，您在大家的陪伴下，即將迎來最終的考驗與蛻變。" }
+        { day: "產後第一天", weather: "sunny", location: "侯府臥房", role: "maid", event: "初為人母，您抱著剛出生的孩兒，心中充滿溫暖。但初乳的分泌與照護立刻成為了首要挑戰。" },
+        { day: "產後第二天", weather: "cloudy", location: "廚房", role: "chef", event: "產後體虛，膳房送來了各式大補之物。如何在發奶與恢復中取得平衡，考驗著您的智慧。" },
+        { day: "產後第三天", weather: "rainy", location: "太醫院", role: "doctor", event: "今日太醫來請平安脈。哺乳時的疼痛與身心變化，需要專業的醫理來調適。" },
+        { day: "產後第四天", weather: "snowy", location: "庭院", role: "medic", event: "氣溫驟降。小少爺似乎有些焦躁不安，醫女前來協助您解讀寶寶的各種信號。" },
+        { day: "產後第五天", weather: "sunny", location: "侯府臥房", role: "maid", event: "寶寶的成長速度驚人，尿布與睡眠的規律開始改變，後宅的下人們也在觀察您的應對。" },
+        { day: "產後第六天", weather: "cloudy", location: "夜晚侯府", role: "doctor", event: "夜半時分，寶寶頻繁討奶，疲憊感襲來。這是對母親體力與意志力的最大考驗。" },
+        { day: "產後第七天", weather: "sunny", location: "庭院", role: "medic", event: "轉眼已至第七日，您逐漸適應了母親的身份。今日的總結，將決定您在侯府的最終地位。" }
     ];
 
     function shuffle(array) {
@@ -141,45 +114,46 @@
         return array;
     }
 
+    // --- 內建題庫 (包含路線影響) ---
     const fallbackQuestions = [
          {
-            "id": "fb_1", "category": "產後調養", "character": "丫鬟 春桃",
+            "category": "產後調養", "character": "丫鬟 春桃",
             "story": ["「夫人...初乳又黃又濃，量這麼少，這怎麼夠小少爺塞牙縫呀？」", "【調養小記】：初乳量雖少但富含抗體與生長因子。新生兒胃僅有彈珠大小（5-7ml），初乳絕對足夠。"],
             "question": "面對春桃的疑慮，夫人該如何回應？",
             "options": [
-                { "text": "初乳是抗體精華，這點量足夠了。", "feedback": "【春桃 恍然大悟】這金黃色的初乳竟是給小少爺最好的保護！", "expr": "happy", "effects": { "knowledge": 20, "maid": 20 } },
-                { "text": "妳說得對，快去熬點濃米湯來給少爺墊墊肚子。", "feedback": "【春桃 慌張】可是蘇醫女說新生兒腸胃弱不能喝米湯啊...", "expr": "shocked", "effects": { "knowledge": -10, "maid": -15 } },
-                { "text": "聽得心煩意亂，自責是不是自己身體不好。", "feedback": "【春桃 趕忙安慰】夫人您千萬別焦慮，奴婢去請教蘇醫女。", "expr": "normal", "effects": { "knowledge": -5, "maid": -5 } }
+                { "text": "初乳是抗體精華，這點量足夠了。", "feedback": "【春桃 恍然大悟】這金黃色的初乳竟是給小少爺最好的保護！", "expr": "happy", "effects": { "knowledge": 20, "maid": 20, "medical": 10 } },
+                { "text": "立規矩：主子做事，下人不得多嘴質疑。", "feedback": "【春桃 慌張退下】奴婢知錯，這就去準備毛巾。", "expr": "shocked", "effects": { "reputation": 10, "maid": -5, "power": 15 } },
+                { "text": "擔憂地抱緊孩子，不理會丫鬟，親自哄睡。", "feedback": "您滿心只有孩兒，春桃見狀也不再多言。", "expr": "normal", "effects": { "health": -5, "bond": 15, "family": 15 } }
             ]
         },
         {
-            "id": "fb_2", "category": "飲食調理", "character": "膳房 總管",
+            "category": "飲食調理", "character": "膳房 總管",
             "story": ["「夫人！這十全大補麻油豬腳湯上面浮著厚油，最是滋補發奶！」", "【調養小記】：產後發奶應多攝取水分與清淡蛋白質。過於油膩的濃湯容易導致乳汁脂肪過高，造成乳腺阻塞。"],
             "question": "為了順暢發奶且不塞奶，夫人該如何選擇？",
             "options": [
-                { "text": "撇去浮油，平日多喝清淡的魚湯與水分。", "feedback": "【總管 敬佩】清淡的高蛋白湯水好吸收又發奶，夫人深諳養生之道！", "expr": "happy", "effects": { "knowledge": 15, "chef": 20, "health": 10 } },
-                { "text": "為了多產點奶，硬著頭皮把這整鍋油膩濃湯喝光。", "feedback": "【總管 擔憂】太過油膩容易讓乳汁脂肪過高，反倒容易塞奶。", "expr": "shocked", "effects": { "knowledge": -10, "chef": -15, "health": -10 } },
-                { "text": "覺得胃口全無，什麼湯水都不想喝，空腹一整天。", "feedback": "【總管 慌忙規勸】夫人產後身子虛可不能不吃東西，奴才去熬小米粥。", "expr": "normal", "effects": { "knowledge": -5, "chef": -10, "health": -20 } }
+                { "text": "撇去浮油，告知總管日後多準備清淡魚湯。", "feedback": "【總管 敬佩】清淡湯水好吸收，夫人深諳養生之道！", "expr": "happy", "effects": { "knowledge": 15, "chef": 20, "medical": 10, "health": 10 } },
+                { "text": "為了讓寶寶吃飽，硬著頭皮把這整鍋油膩濃湯喝光。", "feedback": "【總管 欣慰】夫人為少爺犧牲良多。但您隔日塞奶十分痛苦。", "expr": "shocked", "effects": { "health": -15, "family": 15, "bond": 10 } },
+                { "text": "賞賜總管，並溫和地請他分一碗給其他產婦。", "feedback": "【總管 感恩】夫人宅心仁厚，這就去辦。", "expr": "normal", "effects": { "reputation": 20, "virtue": 15, "chef": 10 } }
             ]
         },
         {
-            "id": "fb_3", "category": "產後調養", "character": "太醫 張大人",
+            "category": "產後調養", "character": "太醫 張大人",
             "story": ["「夫人，小主子若含乳姿勢不對，只含住乳頭會導致微血管破損流血。」", "【調養小記】：正確含乳應讓寶寶嘴巴張大，含住「大部分的乳暈」，下巴貼緊乳房。"],
-            "question": "為避免乳頭破損，正確的含乳姿勢應該是？",
+            "question": "為避免乳頭破損，正確的處理方針是？",
             "options": [
-                { "text": "讓寶寶嘴巴張大，下巴緊貼乳房，含住大部分乳暈。", "feedback": "【太醫 點頭稱是】大口含住乳暈才能正確擠壓乳腺，親餵才不會痛！", "expr": "happy", "effects": { "knowledge": 20, "doctor": 20 } },
-                { "text": "做母親的忍一忍就過去了，只要寶寶含住前端用力吸就好。", "feedback": "【太醫 搖頭嘆息】萬萬不可強忍！只含乳頭會導致嚴重破損與發炎啊。", "expr": "shocked", "effects": { "knowledge": -15, "doctor": -15 } },
-                { "text": "破損太痛了，內心恐懼，決定徹底放棄哺乳改餵水。", "feedback": "【太醫 柔聲規勸】微臣這就讓醫女來協助您調整姿勢，切莫沮喪。", "expr": "normal", "effects": { "knowledge": -10, "doctor": -10 } }
+                { "text": "調整姿勢，讓寶寶下巴緊貼乳房，含住大部分乳暈。", "feedback": "【太醫 點頭稱是】大口含住乳暈才能正確擠壓乳腺！", "expr": "happy", "effects": { "knowledge": 20, "doctor": 15, "medical": 15 } },
+                { "text": "這點痛算什麼，做母親的只要寶寶能喝到奶就好。", "feedback": "【太醫 嘆息】夫人慈母心腸，但強忍只會導致嚴重發炎啊。", "expr": "shocked", "effects": { "health": -15, "family": 20, "bond": 15 } },
+                { "text": "微血管破損是下人沒教好，罰負責照顧的奶娘半個月月錢。", "feedback": "【太醫 默然】夫人治府嚴厲，微臣不敢多言。", "expr": "normal", "effects": { "reputation": 10, "doctor": -10, "power": 15 } }
             ]
         },
         {
-            "id": "fb_4", "category": "育兒知識", "character": "醫女 蘇氏",
+            "category": "育兒知識", "character": "醫女 蘇氏",
             "story": ["「夫人，小主子轉頭舔唇、把小手放進嘴裡，這是『尋乳信號』了。」", "【調養小記】：舔唇、吃手是飢餓的早期信號，若等到嚎啕大哭已是過度飢餓。"],
             "question": "看到寶寶的早期尋乳信號，夫人該怎麼做？",
             "options": [
-                { "text": "趁他情緒安穩、尚未大哭前，趕緊抱過來依需求親餵。", "feedback": "【蘇醫女 欣喜】夫人抓時機真準！這時餵奶寶寶情緒穩定，含乳最順利！", "expr": "happy", "effects": { "knowledge": 20, "medic": 20, "bond": 10 } },
-                { "text": "嚴格遵守長輩定時四小時餵一次的規矩，沒到先別理他。", "feedback": "【蘇醫女 柔聲提醒】等他哭鬧厲害時，往往就因為太餓而不好含乳了呢。", "expr": "shocked", "effects": { "knowledge": -10, "medic": -10 } },
-                { "text": "覺得吃手是不乖的壞習慣，拿手套把他的小手綁起來。", "feedback": "【蘇醫女 趕忙解釋】吃手是新生兒天生的尋乳反射，他在告訴您想喝奶了。", "expr": "normal", "effects": { "knowledge": -15, "medic": -5 } }
+                { "text": "趁他情緒安穩、尚未大哭前，趕緊抱過來依需求親餵。", "feedback": "【蘇醫女 欣喜】這時餵奶寶寶情緒穩定，含乳最順利！", "expr": "happy", "effects": { "knowledge": 15, "medic": 20, "medical": 10 } },
+                { "text": "親手為他換上柔軟的新衣，再溫柔地抱入懷中餵食。", "feedback": "【蘇醫女 點頭】夫人對少爺真是無微不至的呵護。", "expr": "happy", "effects": { "bond": 20, "family": 15, "health": 5 } },
+                { "text": "讓下人們先安撫，自己梳妝整理儀容後再端莊地餵奶。", "feedback": "【蘇醫女 提醒】夫人注重主母儀態，但等他哭鬧就難餵了呢。", "expr": "normal", "effects": { "reputation": 15, "power": 10, "medic": -5 } }
             ]
         }
     ];
@@ -189,34 +163,11 @@
 
     function resetPools() {
         let pool = externalQuestions.length > 0 ? externalQuestions : fallbackQuestions;
-        
-        let maidPool = pool.filter(q => q.character && (q.character.includes('丫鬟') || q.character.includes('春桃')));
-        let chefPool = pool.filter(q => q.character && (q.character.includes('膳房') || q.character.includes('總管')));
-        let doctorPool = pool.filter(q => q.character && (q.character.includes('太醫') || q.character.includes('張大人')));
-        let medicPool = pool.filter(q => q.character && (q.character.includes('醫女') || q.character.includes('蘇氏')));
-
-        // 防呆分配：移除展開運算子 (...) 改用 .slice()
-        if(maidPool.length === 0 && chefPool.length === 0 && doctorPool.length === 0 && medicPool.length === 0) {
-            let shuffled = shuffle(pool.slice());
-            let chunk = Math.max(1, Math.floor(shuffled.length / 4));
-            maidPool = shuffled.slice(0, chunk);
-            chefPool = shuffled.slice(chunk, chunk*2);
-            doctorPool = shuffled.slice(chunk*2, chunk*3);
-            medicPool = shuffled.slice(chunk*3);
-        }
-
-        // 極限防呆：確保陣列至少有一題
-        if(maidPool.length === 0) maidPool = [fallbackQuestions.find(q=>q.character && q.character.includes('丫鬟')) || fallbackQuestions[0]];
-        if(chefPool.length === 0) chefPool = [fallbackQuestions.find(q=>q.character && q.character.includes('膳房')) || fallbackQuestions[1]];
-        if(doctorPool.length === 0) doctorPool = [fallbackQuestions.find(q=>q.character && q.character.includes('太醫')) || fallbackQuestions[2]];
-        if(medicPool.length === 0) medicPool = [fallbackQuestions.find(q=>q.character && q.character.includes('醫女')) || fallbackQuestions[3]];
-
-        // 使用 .slice() 複製陣列，徹底避免使用展開運算子產生的 Syntax Error
         activePools = { 
-            maid: shuffle(maidPool.slice()), 
-            chef: shuffle(chefPool.slice()), 
-            doctor: shuffle(doctorPool.slice()), 
-            medic: shuffle(medicPool.slice()) 
+            maid: shuffle(pool.filter(q => q.character.includes('丫鬟') || q.character.includes('春桃'))), 
+            chef: shuffle(pool.filter(q => q.character.includes('膳房') || q.character.includes('總管'))), 
+            doctor: shuffle(pool.filter(q => q.character.includes('太醫') || q.character.includes('張大人'))), 
+            medic: shuffle(pool.filter(q => q.character.includes('醫女') || q.character.includes('蘇氏'))) 
         };
     }
 
@@ -225,113 +176,35 @@
             let res = await fetch('questions.json');
             if (!res.ok) throw new Error("HTTP status " + res.status);
             let data = await res.json();
-            if (data && data.length > 0) {
-                externalQuestions = data;
-                console.log("外部題庫載入成功！共載入 " + data.length + " 題。");
-            }
+            if (data && data.length > 0) externalQuestions = data;
         } catch (error) {
-            console.warn("無法載入外部題庫 (可能在本地 file:// 環境下)，自動切換至內建備用題庫。", error);
-            // 使用 .slice() 避免展開運算子
+            console.warn("無法載入外部題庫，使用內建備用題庫。");
             externalQuestions = fallbackQuestions.slice();
         } finally {
             resetPools(); 
-            // --- 5. 檢查 loadQuestions() 完成後是否正確切換 ---
             currentState = STATES.START; 
-            console.log("loadQuestions完成，狀態已切換至: STATES.START (應為 0)。目前為: ", currentState);
         }
     }
 
+    // --- 序章設定 ---
     const introStage = {   
         character: "內心獨白",
+        location: "侯府臥房",
         story: [
-            "【大宋汴京 · 侯府】昨日歷經千辛萬苦，我終於平安誕下了府裡的嫡出小少爺。", 
-            "「但侯府深似海，這產後七日絕不只是調養身子，更是重新立威、整頓後宅的關鍵。」", 
-            "「我必須步步為營，不僅要守護孩兒，更要決定未來我在侯府的立足之道。」"
+            "【序章：侯府主母的挑戰】",
+            "我乃大宋名門之女，嫁入這豪門侯府。昨日歷經生死，終於平安誕下了嫡出小少爺。",
+            "看著這雕樑畫棟的侯府臥房，我知道，真正的挑戰才剛開始。",
+            "產後這七日，不只是調養虛弱的鳳體，更是重新整頓後宅、建立主母威信的關鍵時刻。",
+            "府內上下，無數雙眼睛正盯著我。我必須做出抉擇，確立我未來的道路。"
         ],
-        question: "【遊戲目標】望著懷中柔嫩的孩兒，您決定以何種作風開啟這七日？",
+        question: "【立威抉擇】您決定以何種作風開啟這七日的調養與管家之路？",
         options: [
-            { text: "【醫術】研讀醫理，科學調養守護母子平安。", feedback: "【系統】解鎖醫術路線。您決定以理服人，用知識武裝自己。", expr: 'happy', effects: { medical: 20, knowledge: 10 } },
-            { text: "【權謀】恩威並施，藉機敲打下人樹立威嚴。", feedback: "【系統】解鎖權謀路線。您眼神凌厲，決定趁機整頓後宅。", expr: 'normal', effects: { power: 20, reputation: 10 } },
-            { text: "【親情】萬事以孩兒為重，親力親為。", feedback: "【系統】解鎖親情路線。看著孩子，您滿眼溫柔，母愛油然而生。", expr: 'happy', effects: { family: 20, bond: 10 } },
-            { text: "【賢德】以和為貴，溫和對待眾人博取美名。", feedback: "【系統】解鎖賢德路線。您決定以德服人，讓府內外皆稱頌您的賢良。", expr: 'happy', effects: { virtue: 20, health: 10 } }
+            { text: "【賢德】以和為貴，溫和對待下人博取美名。", feedback: "您決定以德服人，溫和的氣質讓下人們感到安心。", expr: 'happy', effects: { virtue: 20, health: 10, maid: 10 } },
+            { text: "【權謀】恩威並施，藉機敲打下人樹立威嚴。", feedback: "您眼神凌厲，決定趁機立威，絕不容許後宅有絲毫怠慢。", expr: 'normal', effects: { power: 20, reputation: 10, chef: -5 } },
+            { text: "【醫術】研讀醫理，科學調養守護母子平安。", feedback: "您深知身體才是本錢，決定以科學醫理武裝自己。", expr: 'happy', effects: { medical: 20, knowledge: 10, doctor: 10 } },
+            { text: "【親情】萬事以孩兒為重，親力親為。", feedback: "看著繈褓中的骨肉，您滿眼溫柔，決定將所有心血傾注於他。", expr: 'happy', effects: { family: 20, bond: 10, medic: 5 } }
         ]
     };
-
-    const originStage = {
-        character: "太醫 張大人",
-        story: ["老夫人派人送來了極其珍貴的『千年人參湯』，指名要給我補身子。","「夫人！這千年人參雖是大補，但對產婦而言，卻是退奶的大忌啊！」\n【調養小記】：人參、韭菜、麥芽水等都是常見的退奶食物，哺乳期應避開。"],
-        question: "面對賞賜與太醫的勸告，您該如何應對？",
-        options: [
-            { text: "【賢德】婉拒並請太醫作證會退奶，改請賜黑豆豬腳湯。", feedback: "【太醫 撫鬚】夫人睿智！既保全了顏面，又守住了小少爺的糧倉。", expr: 'happy', effects: { doctor: 20, virtue: 10 } },
-            { text: "【權謀】為了面子硬著頭皮喝下去，日後再找老夫人算帳。", feedback: "【太醫 擔憂】這...夫人，您喝了之後當晚奶水疏少，下次可得留心了。", expr: 'shocked', effects: { doctor: -20, power: 10 } },
-            { text: "有些不知所措，不知道該聽誰的。", feedback: "【太醫 溫言勸阻】夫人莫慌。這參湯咱們婉言推辭即可。", expr: 'normal', effects: { doctor: -10 } }
-        ]
-    };
-
-    // 每日危機事件池 
-    const crisisPool = [
-        {
-            isCrisis: true,
-            character: "侯府 管事",
-            story: ["「夫人，不好了！外面幾個遠房親戚打著探望名義，在大廳吵著要見您討賞呢！」"],
-            question: "【每日危機】面對這突如其來的滋擾，您打算如何處理？",
-            options: [
-                { text: "【權謀】命家丁直接轟出去，殺雞儆猴！", feedback: "【管事 敬畏】夫人雷厲風行，奴才這就去辦！", expr: 'shocked', effects: { power: 15, reputation: 10, chef: -5 } },
-                { text: "【賢德】請去偏廳好生招待，賞些銀兩打發。", feedback: "【管事 點頭】夫人仁厚，奴才定當妥善安排。", expr: 'normal', effects: { virtue: 15, health: -5, reputation: 5 } }
-            ]
-        },
-        {
-            isCrisis: true,
-            character: "丫鬟 春桃",
-            story: ["「夫人！少爺的尿布突然不夠用了，但負責採買的下人今日卻告假未歸！」"],
-            question: "【每日危機】尿布告急，您要如何應對這後宅失職？",
-            options: [
-                { text: "【親情】親自動手，裁剪自己的舊綢緞軟衣來應急。", feedback: "【春桃 感動】夫人為了少爺竟連名貴衣裳都捨得！", expr: 'happy', effects: { family: 15, bond: 10, maid: 10 } },
-                { text: "【權謀】嚴懲告假下人，命管事立刻快馬去京城採買！", feedback: "【春桃 敬畏】夫人治家嚴明，下人們再不敢怠慢！", expr: 'shocked', effects: { power: 15, reputation: 5 } }
-            ]
-        },
-        {
-            isCrisis: true,
-            character: "醫女 蘇氏",
-            story: ["「夫人，今日送來的補品中，似乎混入了一些來路不明的偏方藥材。」"],
-            question: "【每日危機】面對有疑慮的補品，您的判斷是？",
-            options: [
-                { text: "【醫術】親自查驗藥材，挑出相剋之物並向眾人科普。", feedback: "【蘇醫女 崇拜】夫人醫理深厚，一眼便識破問題！", expr: 'happy', effects: { medical: 15, knowledge: 10, medic: 10 } },
-                { text: "【賢德】悄悄撤下不用，不聲張以保全送禮人的顏面。", feedback: "【蘇醫女 點頭】夫人思慮周全，奴婢會處理妥當。", expr: 'normal', effects: { virtue: 15, maid: 5 } }
-            ]
-        }
-    ];
-
-    let activeCrisis = shuffle(crisisPool.slice());
-
-    const randomEventsPool = [
-        { text: "小少爺看著您咿呀學語，似乎認出了娘親，笑得格外開心。", apply: () => { player.bond += 10; return "羈絆提升 (+10)"; }, expr: 'happy' },
-        { text: "昨夜小少爺哭鬧不休，折騰了一宿，您幾乎沒有闔眼...", apply: () => { player.health -= 15; return "體力嚴重透支 (-15)"; }, expr: 'shocked' },
-        { text: "老夫人派人送來了上好的燕窩，叮囑您好好調理身子。", apply: () => { player.health += 10; player.reputation += 5; return "體力與聲望雙雙提升 (+10)"; }, expr: 'happy' },
-        { text: "京城內流傳著您前些日子發善心施粥的美名。", apply: () => { player.reputation += 15; return "聲望大幅提升 (+15)"; }, expr: 'happy' },
-        { text: "您突然回想起昨日醫女教授的調養知識，茅塞頓開！", apply: () => { player.knowledge += 10; return "智慧靈光一閃 (+10)"; }, expr: 'happy' },
-    ];
-
-    const hiddenEventsPool = [
-        { id: "he_wisdom", triggered: false, check: () => player.knowledge >= 80, text: "【特殊成就：著書立說】\n您的育兒知識淵博，甚至吸引了京城名醫前來求教。您順勢編纂了一本《侯府育兒小記》。\n\n「夫人之才，堪為天下慈母之表率！」", apply: () => { player.reputation += 20; return "聲望大幅提升 (+20)"; }, expr: 'happy' },
-        { id: "he_bond", triggered: false, check: () => player.bond >= 80, text: "【特殊成就：母子連心】\n小少爺對您的氣味異常依賴，只要您一靠近，他便會露出甜美的笑容。\n\n看著他熟睡的臉龐，您覺得一切辛苦都值得了。", apply: () => { player.health += 15; return "母愛帶來力量！體力恢復 (+15)"; }, expr: 'happy' },
-        { id: "he_reputation", triggered: false, check: () => player.reputation >= 80, text: "【特殊成就：誥命加身】\n您的賢良之名傳入宮中，皇后特賜如意一柄，以彰顯侯府主母之德。\n\n全府上下皆以此為榮。", apply: () => { for(let k in player.affections) player.affections[k].target += 10; return "全府上下引以為傲！好感提升 (+10)"; }, expr: 'happy' },
-        { id: "he_npc_maid", triggered: false, check: () => player.affections.maid.target >= 90, text: "【專屬羈絆：主僕同心】\n春桃深夜為您熬製了安神湯，紅著眼眶發誓此生誓死追隨夫人。\n\n「夫人待奴婢如親妹，奴婢定結草銜環以報！」", apply: () => { player.health += 20; return "身心舒暢，體力恢復 (+20)"; }, expr: 'happy' },
-        { id: "he_npc_chef", triggered: false, check: () => player.affections.chef.target >= 90, text: "【專屬羈絆：山珍海味】\n膳房總管研發出了絕世發奶藥膳，特地為您呈上，以謝主母知遇之恩。\n\n「奴才這點手藝，全憑夫人賞識！」", apply: () => { player.health += 20; return "氣血充盈，體力恢復 (+20)"; }, expr: 'happy' }
-    ];
-
-    function triggerHiddenEvent() {
-        for (let i=0; i<hiddenEventsPool.length; i++) {
-            let ev = hiddenEventsPool[i];
-            if (!ev.triggered && ev.check()) {
-                ev.triggered = true;
-                currentHiddenEvent = { text: ev.text, feedback: ev.apply() };
-                mainCharacter.setEmotion(ev.expr);
-                return true;
-            }
-        }
-        return false;
-    }
 
     function determineEnding() {
         let totalAffection = Object.values(player.affections).reduce((sum, npc) => sum + npc.target, 0);
@@ -343,19 +216,18 @@
         }
         
         if (r[highestRoute] >= 30) {
-            if (highestRoute === 'power') return { title: "【權傾侯府】(權謀結局)", desc: "您以鐵腕手段整頓後宅，恩威並施。老夫人放權，您成為侯府說一不二的當家主母！", color: "#8e44ad" };
-            if (highestRoute === 'medical') return { title: "【妙手神醫】(醫術結局)", desc: "您精通醫理調養，不僅將小少爺養得白胖，更將這些知識編纂成冊，名滿京城醫界。", color: "#27ae60" };
-            if (highestRoute === 'family') return { title: "【母慈子孝】(親情結局)", desc: "您將所有心血傾注在孩兒身上，母子連心。後宅歲月靜好，您收穫了最純粹的親情與幸福。", color: "#f39c12" };
-            if (highestRoute === 'virtue') return { title: "【賢德傳家】(賢德結局)", desc: "您以和為貴，寬厚待人。府內外皆稱頌您的賢良淑德，為侯府博得了極高的美名。", color: "#3498db" };
+            if (highestRoute === 'power') return { title: "【權傾侯府】", desc: "您以鐵腕手段整頓後宅，恩威並施。老夫人放權，您成為侯府說一不二的當家主母！(達成權謀路線)", color: "#8e44ad" };
+            if (highestRoute === 'medical') return { title: "【妙手神醫】", desc: "您精通醫理調養，不僅將小少爺養得白胖，更將這些知識編纂成冊，名滿京城醫界。(達成醫術路線)", color: "#27ae60" };
+            if (highestRoute === 'family') return { title: "【母慈子孝】", desc: "您將所有心血傾注在孩兒身上，母子連心。後宅歲月靜好，您收穫了最純粹的親情與幸福。(達成親情路線)", color: "#f39c12" };
+            if (highestRoute === 'virtue') return { title: "【賢德傳家】", desc: "您以和為貴，寬厚待人。府內外皆稱頌您的賢良淑德，為侯府博得了極高的美名。(達成賢德路線)", color: "#3498db" };
         }
 
-        if (player.knowledge >= 80 && player.reputation >= 80 && player.bond >= 80 && totalAffection >= 300) {
-            return { title: "【一代宗婦】", desc: "您完美掌握育兒知識，母子連心，名滿京城且後宅和睦。老夫人將掌家之權全權交予您，成為侯府最輝煌的主母典範！", color: "#d4af37" };
+        if (player.knowledge >= 80 && player.reputation >= 80 && player.bond >= 80 && totalAffection >= 250) {
+            return { title: "【一代宗婦】", desc: "您完美掌握育兒知識，母子連心，名滿京城且後宅和睦。成為侯府最輝煌的主母典範！", color: "#d4af37" };
         }
         return { title: "【漸入佳境】", desc: "這七日雖有波折，但您與寶寶都在努力適應。來日方長，一切都會越來越好。", color: "#4caf50" };
     }
 
-    // --- 補回遺失的環境粒子系統 ---
     class DustParticle {
         constructor() {
             this.x = Math.random() * cw; this.y = Math.random() * ch;
@@ -375,7 +247,6 @@
     }
     let dustParticles = [];
     for(let i=0; i<40; i++) dustParticles.push(new DustParticle());
-    // ------------------------------------
 
     class ProceduralLive2DCharacter {
         constructor(role, customColors = null) {
@@ -804,60 +675,6 @@
         currentState = STATES.FEEDBACK;
     }
 
-    function applyFreeAction(actionId) {
-        let offsetY = ch/2 - 100;
-        player.ap -= 1;
-        
-        if (actionId === 'act_study') {
-            player.knowledge += 15; player.health -= 5;
-            floatingTexts.push(new FloatingText(cw/2, offsetY, "智慧 +15", "#4caf50"));
-            floatingTexts.push(new FloatingText(cw/2, offsetY-40, "體力 -5", "#e74c3c"));
-            mainCharacter.setEmotion('normal');
-            selectedOptionFeedback = "您在書閣研讀了一會兒醫書，增長了不少調養知識，但也消耗了些許體力。";
-        } else if (actionId === 'act_rest') {
-            player.health += 25; 
-            floatingTexts.push(new FloatingText(cw/2, offsetY, "體力 +25", "#4caf50"));
-            mainCharacter.setEmotion('happy');
-            selectedOptionFeedback = "您在房內焚香靜坐，閉目養神，感到體力逐漸充沛。";
-        } else if (actionId === 'act_charity') {
-            player.reputation += 15; player.health -= 5;
-            floatingTexts.push(new FloatingText(cw/2, offsetY, "聲望 +15", "#4caf50"));
-            floatingTexts.push(new FloatingText(cw/2, offsetY-40, "體力 -5", "#e74c3c"));
-            mainCharacter.setEmotion('happy');
-            selectedOptionFeedback = "您命人開倉賑濟孤寡，侯府主母的仁善之名在市井間傳開。";
-        } else if (actionId === 'act_baby') {
-            player.bond += 15; player.health -= 5;
-            floatingTexts.push(new FloatingText(cw/2, offsetY, "羈絆 +15", "#4caf50"));
-            floatingTexts.push(new FloatingText(cw/2, offsetY-40, "體力 -5", "#e74c3c"));
-            mainCharacter.setEmotion('happy');
-            selectedOptionFeedback = "您親自為孩兒輕唱搖籃曲，逗弄著他，感受著血脈相連的溫馨。";
-        } else if (actionId === 'act_manage') {
-            player.health -= 10;
-            for(let key in player.affections) { player.affections[key].target += 5; }
-            floatingTexts.push(new FloatingText(cw/2, offsetY, "眾人好感 +5", "#e86f88"));
-            floatingTexts.push(new FloatingText(cw/2, offsetY-40, "體力 -10", "#e74c3c"));
-            mainCharacter.setEmotion('normal');
-            selectedOptionFeedback = "您巡視後宅，恩威並施，仔細過問各處開銷，下人們對您越發恭敬。";
-        }
-        
-        player.health = Math.max(0, Math.min(100, player.health));
-        player.knowledge = Math.max(0, Math.min(100, player.knowledge));
-        player.reputation = Math.max(0, Math.min(100, player.reputation));
-        player.bond = Math.max(0, Math.min(100, player.bond));
-        
-        currentState = STATES.ACTION_RESULT;
-    }
-
-    function generateRandomEvent() {
-        let event = randomEventsPool[Math.floor(Math.random() * randomEventsPool.length)];
-        currentRandomEvent = { text: event.text, feedback: event.apply() };
-        mainCharacter.setEmotion(event.expr);
-        player.health = Math.max(0, Math.min(100, player.health));
-        player.knowledge = Math.max(0, Math.min(100, player.knowledge));
-        player.reputation = Math.max(0, Math.min(100, player.reputation));
-        player.bond = Math.max(0, Math.min(100, player.bond));
-    }
-
     function drawGlassPanel(ctx, x, y, w, h) {
         ctx.save();
         ctx.fillStyle = 'rgba(12, 16, 24, 0.85)'; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20;
@@ -904,7 +721,11 @@
         ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.textAlign = 'left'; 
         ctx.fillText(`【大宋宣和元年】`, 110, 55);
         ctx.fillStyle = '#e0e0e0'; ctx.font = `18px ${FONT_FAMILY}`; 
-        ctx.fillText(`產後第 ${currentDay} 天`, 120, 85);
+        
+        // 顯示當前場景名稱
+        let locText = "";
+        if(currentDay >= 1 && currentDay <= 7) locText = daysData[currentDay-1].location;
+        ctx.fillText(`第${currentDay}天 ‧ ${locText}`, 120, 85);
         ctx.shadowBlur = 0;
     }
 
@@ -1005,7 +826,7 @@
         lines.forEach((l, i) => { ctx.fillText(l, 0, startY + i * 24); });
         ctx.restore();
         
-        clickZones.push({ id: id, x: btn.x, y: btn.y, w: btn.w, h: btn.h });
+        clickZones.push({ id: id, ...btn });
     }
 
     function renderDialog(ctx, titleText, contentText, options = null) {
@@ -1047,7 +868,7 @@
         
         let currY = boxY + padding;
         contentLines.forEach(line => {
-            if(line.includes("【調養小記】") || line.includes("【隱藏事件") || line.includes("【特殊羈絆")) ctx.fillStyle = '#f39c12';
+            if(line.includes("【調養小記】") || line.includes("【序章") || line.includes("【系統】")) ctx.fillStyle = '#f39c12';
             else ctx.fillStyle = '#f0f0f0';
             ctx.fillText(line, boxX + padding, currY);
             currY += 34;
@@ -1072,8 +893,12 @@
     }
 
     function drawSceneBackground(ctx) {
-        let dayInfo = daysData[Math.min(currentDay - 1, daysData.length - 1)];
-        let loc = dayInfo.location;
+        // 動態判定當前場景
+        let loc = "華麗正房";
+        if (currentState === STATES.START) loc = "侯府正廳";
+        else if (currentStage && currentStage.location) loc = currentStage.location;
+        else if (currentDay >= 1 && currentDay <= 7) loc = daysData[currentDay - 1].location;
+
         let grad = ctx.createLinearGradient(0, 0, 0, ch);
         
         if (loc.includes('正房') || loc.includes('臥房')) {
@@ -1083,7 +908,7 @@
             ctx.fillRect(cw*0.1, ch*0.2, cw*0.3, ch*0.6); ctx.fillRect(cw*0.6, ch*0.2, cw*0.3, ch*0.6);
             ctx.strokeStyle = 'rgba(212, 175, 55, 0.1)'; ctx.lineWidth = 4;
             ctx.strokeRect(cw*0.1, ch*0.2, cw*0.3, ch*0.6); ctx.strokeRect(cw*0.6, ch*0.2, cw*0.3, ch*0.6);
-        } else if (loc.includes('花園')) {
+        } else if (loc.includes('庭院') || loc.includes('花園')) {
             grad.addColorStop(0, '#101820'); grad.addColorStop(1, '#1a2b3c');
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
             ctx.fillStyle = 'rgba(255, 255, 220, 0.8)'; ctx.shadowColor = '#ffefa0'; ctx.shadowBlur = 50;
@@ -1092,17 +917,22 @@
             ctx.beginPath(); ctx.moveTo(0, ch); ctx.lineTo(0, ch*0.6);
             ctx.quadraticCurveTo(cw*0.3, ch*0.4, cw*0.6, ch*0.7); ctx.quadraticCurveTo(cw*0.8, ch*0.6, cw, ch*0.8);
             ctx.lineTo(cw, ch); ctx.fill();
-        } else if (loc.includes('膳房')) {
+        } else if (loc.includes('廚房') || loc.includes('膳房')) {
             grad.addColorStop(0, '#1a1005'); grad.addColorStop(1, '#2a1005');
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
             let fire = ctx.createRadialGradient(cw/2, ch, 0, cw/2, ch, ch*0.8);
             fire.addColorStop(0, 'rgba(255, 100, 0, 0.15)'); fire.addColorStop(1, 'rgba(0,0,0,0)');
             ctx.fillStyle = fire; ctx.fillRect(0, 0, cw, ch);
-        } else if (loc.includes('書閣') || loc.includes('暖閣')) {
+        } else if (loc.includes('太醫院') || loc.includes('書閣')) {
             grad.addColorStop(0, '#10151a'); grad.addColorStop(1, '#0a0d14');
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
             ctx.fillStyle = 'rgba(0,0,0,0.3)';
             for(let i=0; i<5; i++) { ctx.fillRect(0, ch*0.2 + i*ch*0.15, cw, ch*0.02); }
+        } else if (loc.includes('夜晚')) {
+            grad.addColorStop(0, '#020510'); grad.addColorStop(1, '#0a0f1c');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'; ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 30;
+            ctx.beginPath(); ctx.arc(cw*0.2, ch*0.2, Math.min(cw,ch)*0.08, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
         } else {
             grad.addColorStop(0, '#151b29'); grad.addColorStop(1, '#05070a');
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
@@ -1150,11 +980,12 @@
             if (currentState === STATES.STORY || currentState === STATES.QUESTION || currentState === STATES.FEEDBACK) {
                 let stage = currentStage || introStage;
                 let charName = stage.character || "";
-                if (charName.includes("春桃")) activeCharacter = npcs.maid;
+                if (charName.includes("春桃") || charName.includes("丫鬟")) activeCharacter = npcs.maid;
                 else if (charName.includes("總管") || charName.includes("管事")) activeCharacter = npcs.chef;
                 else if (charName.includes("張大人") || charName.includes("太醫")) activeCharacter = npcs.doctor;
                 else if (charName.includes("蘇氏") || charName.includes("醫女")) activeCharacter = npcs.medic;
-            } else if (currentState === STATES.INTERACT_CHOICE || currentState === STATES.FREE_ACTION || currentState === STATES.RANDOM_EVENT || currentState === STATES.HIDDEN_EVENT || currentState === STATES.ACTION_RESULT) {
+                else activeCharacter = mainCharacter;
+            } else {
                 activeCharacter = mainCharacter;
             }
 
@@ -1178,7 +1009,7 @@
             ctx.fillStyle = '#fff'; 
             let titleSize = Math.max(30, Math.min(60, cw * 0.08));
             ctx.font = `bold ${titleSize}px ${FONT_FAMILY}`; ctx.fillText("汴京娘子調養記", cw/2, ch/2 - 100); ctx.shadowBlur = 0;
-            ctx.fillStyle = '#d4af37'; ctx.font = `${titleSize*0.45}px ${FONT_FAMILY}`; ctx.fillText("— 深度決策 RPG 升級版 —", cw/2, ch/2 - 40);
+            ctx.fillStyle = '#d4af37'; ctx.font = `${titleSize*0.45}px ${FONT_FAMILY}`; ctx.fillText("— 劇情沉浸版 —", cw/2, ch/2 - 40);
             drawButton(ctx, 'btn_start', {x: cw/2 - 100, y: ch/2 + 80, w: 200, h: 60}, "進入侯府");
         }
         else if (currentState === STATES.DAY_TRANSITION) {
@@ -1199,53 +1030,6 @@
             ctx.fillText("▼ 點擊開啟今日日程 ▼", cw/2, ch/2 + 150);
             ctx.globalAlpha = globalAlpha;
             clickZones.push({ id: 'screen_next_day', x: 0, y: 0, w: cw, h: ch });
-        }
-        else if (currentState === STATES.FREE_ACTION) {
-            drawDatePanel(ctx); drawStatsPanel(ctx);
-            let boxW = Math.min(800, cw - 40); let boxX = cw / 2 - boxW / 2;
-            let boxY = ch - 340;
-            drawGlassPanel(ctx, boxX, boxY, boxW, 320);
-            
-            ctx.save();
-            ctx.fillStyle = '#d4af37'; ctx.font = `bold 22px ${FONT_FAMILY}`; ctx.textAlign = 'center';
-            ctx.fillText(`【自由行動】今日剩餘行動次數：${player.ap}`, cw/2, boxY + 40);
-            ctx.restore();
-
-            let btnW = Math.min(320, boxW/2 - 40);
-            drawButton(ctx, 'act_study',   {x: cw/2 - btnW - 10, y: boxY + 70, w: btnW, h: 55}, "研讀醫書 (升智慧，耗體力)");
-            drawButton(ctx, 'act_rest',    {x: cw/2 + 10,        y: boxY + 70, w: btnW, h: 55}, "靜心休養 (大回體力)");
-            drawButton(ctx, 'act_charity', {x: cw/2 - btnW - 10, y: boxY + 145, w: btnW, h: 55}, "施粥行善 (升聲望，耗體力)");
-            drawButton(ctx, 'act_baby',    {x: cw/2 + 10,        y: boxY + 145, w: btnW, h: 55}, "陪伴孩兒 (升羈絆，耗體力)");
-            drawButton(ctx, 'act_manage',  {x: cw/2 - btnW/2,    y: boxY + 220, w: btnW, h: 55}, "巡視後宅 (全好感升，耗體力)");
-        }
-        else if (currentState === STATES.ACTION_RESULT) {
-            drawDatePanel(ctx); drawStatsPanel(ctx);
-            renderDialog(ctx, "行動結果", selectedOptionFeedback, null);
-        }
-        else if (currentState === STATES.RANDOM_EVENT) {
-            drawDatePanel(ctx); drawStatsPanel(ctx);
-            renderDialog(ctx, "突發事件", currentRandomEvent.text + "\n\n" + currentRandomEvent.feedback, null);
-        }
-        else if (currentState === STATES.HIDDEN_EVENT) {
-            drawDatePanel(ctx); drawStatsPanel(ctx);
-            renderDialog(ctx, "隱藏事件觸發！", currentHiddenEvent.text + "\n\n" + currentHiddenEvent.feedback, null);
-        }
-        else if (currentState === STATES.INTERACT_CHOICE) {
-            drawDatePanel(ctx); drawStatsPanel(ctx);
-            let boxW = Math.min(800, cw - 40); let boxX = cw / 2 - boxW / 2;
-            let boxY = ch - 260;
-            drawGlassPanel(ctx, boxX, boxY, boxW, 240);
-            
-            ctx.save();
-            ctx.fillStyle = '#d4af37'; ctx.font = `bold 22px ${FONT_FAMILY}`; ctx.textAlign = 'center';
-            ctx.fillText("今日趁著孩兒安穩睡去，夫人打算找誰商議調理細節？", cw/2, boxY + 40);
-            ctx.restore();
-
-            let btnW = Math.min(320, boxW/2 - 40);
-            drawButton(ctx, 'call_maid', {x: cw/2 - btnW - 10, y: boxY + 70, w: btnW, h: 55}, "傳召【丫鬟 春桃】");
-            drawButton(ctx, 'call_chef', {x: cw/2 + 10, y: boxY + 70, w: btnW, h: 55}, "詢問【膳房 總管】");
-            drawButton(ctx, 'call_doctor', {x: cw/2 - btnW - 10, y: boxY + 145, w: btnW, h: 55}, "向【太醫 張大人】請安");
-            drawButton(ctx, 'call_medic', {x: cw/2 + 10, y: boxY + 145, w: btnW, h: 55}, "與【醫女 蘇氏】切磋醫理");
         }
         else if (currentState === STATES.STORY) {
             drawDatePanel(ctx); drawStatsPanel(ctx);
@@ -1287,74 +1071,27 @@
         requestAnimationFrame(gameLoop);
     }
 
-    function checkPostActionEvents() {
-        if (!dailyFlags.crisisDone && activeCrisis.length > 0 && Math.random() < 0.5) {
-            dailyFlags.crisisDone = true;
-            currentStage = activeCrisis.pop();
-            mainCharacter.resetAppearance();
-            currentStoryLine = 0;
-            currentState = STATES.STORY;
-        } else if (!dailyFlags.randomDone && Math.random() < 0.4) {
-            dailyFlags.randomDone = true;
-            generateRandomEvent();
-            currentState = STATES.RANDOM_EVENT;
-        } else if (!dailyFlags.hiddenDone && triggerHiddenEvent()) {
-            dailyFlags.hiddenDone = true;
-            currentState = STATES.HIDDEN_EVENT;
-        } else {
-            proceedToDailyContent();
-        }
-    }
-
-    function proceedToDailyContent() {
-        if (currentDay === 1) { currentStage = introStage; mainCharacter.resetAppearance(); currentState = STATES.STORY; }
-        else if (currentDay === 3) { currentStage = originStage; mainCharacter.resetAppearance(); currentState = STATES.STORY; }
-        else { mainCharacter.resetAppearance(); currentState = STATES.INTERACT_CHOICE; }
-    }
-
     function handleInteraction(cx, cy) {
         let clicked = clickZones.find(z => cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h);
         
         if (currentState === STATES.START && clicked && clicked.id === 'btn_start') {
-            resetPools(); currentDay = 1; globalAlpha = 0; currentState = STATES.DAY_TRANSITION;
+            resetPools(); currentDay = 1; globalAlpha = 0; 
+            currentStage = introStage;
+            mainCharacter.setEmotion('normal');
+            currentState = STATES.STORY;
         }
         else if (currentState === STATES.DAY_TRANSITION && clicked && clicked.id === 'screen_next_day') {
-            dailyFlags = { crisisDone: false, randomDone: false, hiddenDone: false };
-            player.ap = 3; 
-            currentState = STATES.FREE_ACTION;
-        }
-        else if (currentState === STATES.FREE_ACTION && clicked && clicked.id.startsWith('act_')) {
-            applyFreeAction(clicked.id);
-        }
-        else if (currentState === STATES.ACTION_RESULT && clicked && clicked.id === 'screen_next') {
-            if (player.ap > 0) {
-                currentState = STATES.FREE_ACTION;
-            } else {
-                checkPostActionEvents();
-            }
-        }
-        else if (currentState === STATES.RANDOM_EVENT && clicked && clicked.id === 'screen_next') {
-            checkPostActionEvents();
-        }
-        else if (currentState === STATES.HIDDEN_EVENT && clicked && clicked.id === 'screen_next') {
-            checkPostActionEvents();
-        }
-        else if (currentState === STATES.INTERACT_CHOICE && clicked && clicked.id.startsWith('call_')) {
-            let role = clicked.id.split('_')[1];
-            if(activePools[role] && activePools[role].length > 0) {
+            // 進入每日劇情，根據 daysData 取得對應角色
+            let dayData = daysData[currentDay - 1];
+            let role = dayData.role;
+            if (activePools[role] && activePools[role].length > 0) {
                 currentStage = activePools[role].pop();
             } else {
-                let npcName = player.affections[role].name;
-                currentStage = {
-                    character: npcName,
-                    story: ["「夫人喚微臣/奴婢前來，可是身子有些勞累？產後多休息，保持心情愉悅是最好的調養喔。」"],
-                    question: "面對下人的貼心問候，您打算？",
-                    options: shuffle([
-                        { text: "微笑點頭，詢問今日少爺的照護狀況。", feedback: "大家都為夫人的溫和明理感到如沐春風。", val: 15, expr: 'happy', effects: { [role]: 15 } },
-                        { text: "覺得有些疲倦，點點頭讓他們先下去忙吧。", feedback: "大家體諒夫人產後虛弱，輕聲告退讓您好好歇息。", val: 5, expr: 'normal', effects: { [role]: 5 } }
-                    ])
-                };
+                // 如果外部題庫不夠用，從 fallback 取一題相應角色的
+                let roleText = role === 'maid' ? '丫鬟' : role === 'chef' ? '總管' : role === 'doctor' ? '太醫' : '醫女';
+                currentStage = fallbackQuestions.find(q => q.character && q.character.includes(roleText)) || fallbackQuestions[0];
             }
+            currentStage.location = dayData.location;
             mainCharacter.resetAppearance();
             currentStoryLine = 0;
             currentState = STATES.STORY;
@@ -1368,8 +1105,8 @@
             applyChoice(currentStage.options[idx]);
         }
         else if (currentState === STATES.FEEDBACK && clicked && clicked.id === 'screen_next') {
-            if (currentStage && currentStage.isCrisis) {
-                checkPostActionEvents();
+            if (currentStage === introStage) {
+                currentState = STATES.DAY_TRANSITION;
             } else {
                 currentDay++; currentStoryLine = 0;
                 if (currentDay > 7) { 
@@ -1382,12 +1119,14 @@
         }
         else if (currentState === STATES.END && clicked && clicked.id === 'btn_restart') {
             currentDay = 1; 
-            player.knowledge = 50; player.health = 80; player.reputation = 50; player.bond = 50;
+            player.knowledge = 50; player.health = 60; player.reputation = 50; player.bond = 50;
             player.routes = { virtue: 0, power: 0, medical: 0, family: 0 };
             resetPools();
             for(let key in player.affections) { player.affections[key].target = 20; player.affections[key].current = 20; player.affections[key].status = "陌生"; }
-            hiddenEventsPool.forEach(ev => ev.triggered = false);
-            globalAlpha = 0; currentState = STATES.DAY_TRANSITION;
+            globalAlpha = 0; 
+            currentStage = introStage;
+            mainCharacter.setEmotion('normal');
+            currentState = STATES.STORY;
         }
     }
 
@@ -1419,7 +1158,7 @@
 
     // 啟動程式 
     loadQuestions();
-    requestAnimationFrame(gameLoop); // 確保一開始就開始繪製
+    requestAnimationFrame(gameLoop);
 
 </script>
 </body>
