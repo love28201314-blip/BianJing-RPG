@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>汴京娘子調養記 - 豪華典藏版</title>
+    <title>汴京娘子調養記 - 產科衛教專業版</title>
     <style>
         :root {
             --gold: #d4af37;
@@ -101,7 +101,7 @@
             <div id="menu-main" style="text-align: center;">
                 <button class="sys-btn" onclick="saveGame()">儲存進度</button>
                 <button class="sys-btn" onclick="loadGame()">讀取進度</button>
-                <button class="sys-btn" onclick="showGallery()">侯府圖鑑</button>
+                <button class="sys-btn" onclick="showGallery()">衛教結業圖鑑</button>
                 <button class="sys-btn" onclick="showAchievements()">光輝成就</button>
                 <button class="sys-btn" style="border-color: #8b1e28; color: #ffcccc;" onclick="window.location.reload()">回到標題</button>
             </div>
@@ -145,7 +145,7 @@
     const STATES = { LOADING: 0, TITLE: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6, SYSTEM: 7, MODE_SELECT: 8, FREE_MENU: 9 };
     let currentState = STATES.LOADING; 
     
-    let gameMode = "tutorial"; // "tutorial" = 七日衛教體驗, "free" = 繼續孕期照護
+    let gameMode = "tutorial"; // "tutorial" = 七日衛教體驗, "free" = 繼續孕期照護模式
     let currentDay = 1; let currentStage = null; let currentStoryLine = 0;
     let selectedOptionFeedback = "";
     let mouse = { x: cw/2, y: ch/2, targetX: cw/2, targetY: ch/2, isDown: false };
@@ -157,14 +157,15 @@
     let bloomIntensity = 0; 
     let bloomColor = '212,175,55'; 
 
+    // 新的數值系統：衛教知識, 母體健康, 新生兒健康, 親子連結
     let player = { 
-        knowledge: 50, health: 60, reputation: 50, bond: 50, 
+        knowledge: 40, health: 60, babyHealth: 60, bond: 50, 
         routes: { virtue: 0, power: 0, medical: 0, family: 0 }, 
         affections: {
-            maid: { name: "丫鬟 春桃", current: 20, target: 20, max: 100, color: "#e86f88", status: "陌生" },
-            chef: { name: "膳房 總管", current: 20, target: 20, max: 100, color: "#d29c72", status: "陌生" },
-            doctor: { name: "太醫 張大人", current: 20, target: 20, max: 100, color: "#6ca07e", status: "陌生" },
-            medic: { name: "醫女 蘇氏", current: 20, target: 20, max: 100, color: "#82c0d9", status: "陌生" }
+            maid: { name: "丫鬟 春桃", current: 20, target: 20, max: 100, color: "#e86f88", status: "輔助" },
+            chef: { name: "膳房 總管", current: 20, target: 20, max: 100, color: "#d29c72", status: "輔助" },
+            doctor: { name: "太醫 張大人", current: 20, target: 20, max: 100, color: "#6ca07e", status: "衛教指導" },
+            medic: { name: "醫女 蘇氏", current: 20, target: 20, max: 100, color: "#82c0d9", status: "衛教指導" }
         }
     };
 
@@ -201,19 +202,17 @@
     for (let i = 0; i < 40; i++) dustParticles.push(new DustParticle());
 
     let globalData = {
-        playCount: 0,
-        unlockedEndings: [],
+        playCount: 0, unlockedEndings: [],
         achievements: {
-            'first_blood': { name: "初入侯府", desc: "完成序章，正式踏入後宅。", unlocked: false },
-            'god_hand': { name: "杏林聖手", desc: "醫術路線達到最高，解鎖神醫結局。", unlocked: false },
-            'iron_lady': { name: "雷厲風行", desc: "權謀路線達到最高，解鎖掌權結局。", unlocked: false },
-            'max_bond': { name: "主僕同心", desc: "任意一位下人好感度達到滿值。", unlocked: false }
+            'first_blood': { name: "初識醫理", desc: "完成第一天衛教體驗。", unlocked: false },
+            'god_hand': { name: "杏林模範", desc: "衛教知識與醫療路線達到最高。", unlocked: false },
+            'max_bond': { name: "母嬰同心", desc: "親子連結達到滿值。", unlocked: false }
         }
     };
 
     function loadGlobalData() {
         try {
-            const saved = localStorage.getItem('bianjing_global');
+            const saved = localStorage.getItem('bianjing_global_edu');
             if (saved) {
                 const parsed = JSON.parse(saved);
                 globalData.playCount = parsed.playCount || 0;
@@ -222,7 +221,7 @@
             }
         } catch(e) {}
     }
-    function saveGlobalData() { localStorage.setItem('bianjing_global', JSON.stringify(globalData)); }
+    function saveGlobalData() { localStorage.setItem('bianjing_global_edu', JSON.stringify(globalData)); }
 
     function showSysMessage(msg) {
         selectedOptionFeedback = msg;
@@ -232,13 +231,13 @@
 
     function saveGame() {
         const saveData = { player, currentDay, currentStage, currentStoryLine, gameMode };
-        localStorage.setItem('bianjing_save', JSON.stringify(saveData));
+        localStorage.setItem('bianjing_save_edu', JSON.stringify(saveData));
         toggleMenu(); showSysMessage("進度已儲存。");
     }
 
     function loadGame() {
         try {
-            const saved = localStorage.getItem('bianjing_save');
+            const saved = localStorage.getItem('bianjing_save_edu');
             if(saved) {
                 const data = JSON.parse(saved);
                 player = data.player; currentDay = data.currentDay; 
@@ -251,11 +250,10 @@
 
     function checkAchievements() {
         if(currentDay > 1 && !globalData.achievements['first_blood'].unlocked) {
-            globalData.achievements['first_blood'].unlocked = true; saveGlobalData(); showSysMessage("解鎖成就：初入侯府");
+            globalData.achievements['first_blood'].unlocked = true; saveGlobalData(); showSysMessage("解鎖成就：初識醫理");
         }
-        let maxAffection = Math.max(...Object.values(player.affections).map(a => a.target));
-        if(maxAffection >= 90 && !globalData.achievements['max_bond'].unlocked) {
-            globalData.achievements['max_bond'].unlocked = true; saveGlobalData(); showSysMessage("解鎖成就：主僕同心");
+        if(player.bond >= 90 && !globalData.achievements['max_bond'].unlocked) {
+            globalData.achievements['max_bond'].unlocked = true; saveGlobalData(); showSysMessage("解鎖成就：母嬰同心");
         }
     }
 
@@ -280,22 +278,21 @@
     function showGallery() {
         document.getElementById('menu-main').style.display = 'none';
         document.getElementById('menu-gallery').style.display = 'block';
-        document.getElementById('menu-title').innerText = "侯府圖鑑 (解鎖結局)";
+        document.getElementById('menu-title').innerText = "衛教結業圖鑑";
         
         const grid = document.getElementById('gallery-grid'); grid.innerHTML = '';
         const allEndings = [
-            { id: '【一代宗婦】', desc: "完美結局。智慧、聲望、羈絆與好感皆達頂峰。" },
-            { id: '【權傾侯府】', desc: "權謀路線結局。以鐵腕統治後宅。" },
-            { id: '【妙手神醫】', desc: "醫術路線結局。懸壺濟世，名留青史。" },
-            { id: '【母慈子孝】', desc: "親情路線結局。歲月靜好，母子連心。" },
-            { id: '【賢德傳家】', desc: "賢德路線結局。以德服人，名滿京城。" },
-            { id: '【積勞成疾】', desc: "體力耗盡的遺憾結局。" }
+            { id: '【全能守護母嬰】', desc: "完美結業。知識、健康與連結皆達頂峰。" },
+            { id: '【杏林衛教大使】', desc: "醫術路線。您已具備極高的產科護理知識。" },
+            { id: '【親情無限羈絆】', desc: "親情路線。母子連心，新生兒健康優良。" },
+            { id: '【侯府健康管理者】', desc: "管理路線。成功調度資源，確保產褥期順利。" },
+            { id: '【知識匱乏的風險】', desc: "未達標結業。知識不足導致母嬰健康出現隱患。" }
         ];
         allEndings.forEach(end => {
             const isUnlocked = globalData.unlockedEndings.includes(end.id);
             grid.innerHTML += `<div class="achievement-card ${isUnlocked ? '' : 'locked'}">
                 <h3>${isUnlocked ? end.id : '？？？'}</h3>
-                <p>${isUnlocked ? end.desc : '尚未解鎖此人生軌跡。'}</p></div>`;
+                <p>${isUnlocked ? end.desc : '尚未達成此結業目標。'}</p></div>`;
         });
     }
     function showAchievements() {
@@ -310,134 +307,60 @@
         }
     }
 
+    // 產後七日衛教主線 (以醫療角色為核心)
     const daysData = [
-        { day: "產後第一天", weather: "sunny", location: "侯府臥房", role: "maid", event: "初為人母，您抱著剛出生的孩兒，心中充滿溫暖。但初乳的分泌與照護立刻成為了首要挑戰。" },
-        { day: "產後第二天", weather: "cloudy", location: "廚房", role: "chef", event: "產後體虛，膳房送來了各式大補之物。如何在發奶與恢復中取得平衡，考驗著您的智慧。" },
-        { day: "產後第三天", weather: "rainy", location: "太醫院", role: "doctor", event: "今日太醫來請平安脈。哺乳時的疼痛與身心變化，需要專業的醫理來調適。" },
-        { day: "產後第四天", weather: "snowy", location: "庭院", role: "medic", event: "氣溫驟降。小少爺似乎有些焦躁不安，醫女前來協助您解讀寶寶的各種信號。" },
-        { day: "產後第五天", weather: "sunny", location: "侯府臥房", role: "maid", event: "寶寶的成長速度驚人，尿布與睡眠的規律開始改變，後宅的下人們也在觀察您的應對。" },
-        { day: "產後第六天", weather: "cloudy", location: "夜晚侯府", role: "doctor", event: "夜半時分，寶寶頻繁討奶，疲憊感襲來。這是對母親體力與意志力的最大考驗。" },
-        { day: "產後第七天", weather: "sunny", location: "庭院", role: "medic", event: "轉眼已至第七日，您逐漸適應了母親的身份。今日的總結，將決定您在侯府的最終地位。" }
+        { day: "產後第一天", weather: "sunny", location: "侯府臥房", role: "medic", event: "初為人母，產後首重觀察生命徵象與子宮收縮。醫女蘇氏前來為您進行首次產後護理指導。" },
+        { day: "產後第二天", weather: "cloudy", location: "太醫院", role: "doctor", event: "產後第二天，太醫前來查房，重點關注惡露的排出與會陰傷口的照護狀況。" },
+        { day: "產後第三天", weather: "rainy", location: "侯府臥房", role: "medic", event: "乳汁開始分泌，乳房可能出現脹痛。醫女蘇氏將指導您正確的母乳哺育與含乳姿勢。" },
+        { day: "產後第四天", weather: "snowy", location: "庭院", role: "medic", event: "新生兒的生理性黃疸可能在此時出現，需要密切觀察寶寶的膚色、活動力與排泄狀況。" },
+        { day: "產後第五天", weather: "sunny", location: "廚房", role: "chef", event: "產褥期飲食需兼顧母體恢復與泌乳。膳房總管在太醫指導下，前來與您確認營養攝取原則。" },
+        { day: "產後第六天", weather: "cloudy", location: "夜晚侯府", role: "medic", event: "夜間哺育易引發產婦疲勞與情緒低落。醫女前來關心您的心理健康與睡眠品質。" },
+        { day: "產後第七天", weather: "sunny", location: "太醫院", role: "doctor", event: "產後滿一週，太醫為您進行階段性總結評估，確認子宮復舊進度與母嬰整體健康。" }
     ];
 
-    const fallbackQuestions = [
-         {
-            "category": "產後身心", "character": "丫鬟 春桃",
-            "story": ["「夫人，您今日看著窗外的落葉，似乎有些悶悶不樂。是不是奴婢們伺候得不夠周到？」"],
-            "question": "面對突如其來的低落情緒與丫鬟的關心，您會怎麼做？",
-            "options": [
-                { "text": "微笑著握住春桃的手，聊些開心的家常。", "feedback": "【春桃 安心】您選擇敞開心扉，這份真誠的交流讓您的心情平靜了下來。", "expr": "happy", "effects": { "health": 10, "maid": 15, "virtue": 15 } },
-                { "text": "立刻振作精神，要求查看近期的侯府帳冊。", "feedback": "【春桃 敬佩】您選擇用責任來掩蓋脆弱。雷厲風行讓人敬佩，但也別忘了適時休息。", "expr": "shocked", "effects": { "reputation": 15, "power": 15, "health": -5 } },
-                { "text": "獨自走到搖籃旁，靜靜看著熟睡的孩子。", "feedback": "【內心 溫暖】孩子平靜的呼吸聲是最好的安撫，所有的不安都煙消雲散。", "expr": "normal", "effects": { "bond": 15, "family": 15 } }
-            ]
-        },
-        {
-            "category": "家庭溝通", "character": "膳房 總管",
-            "story": ["「夫人！這十全大補濃湯是老夫人特意吩咐熬製的，最是滋補，您趁熱多喝些！」"],
-            "question": "面對長輩的盛情與這碗濃郁的補湯，夫人該如何抉擇？",
-            "options": [
-                { "text": "溫和地請總管日後多準備清淡高湯，細水長流地調理。", "feedback": "【總管 點頭】您深諳養生之道，清淡的湯水確實讓您的身體感到更加輕盈舒暢。", "expr": "happy", "effects": { "knowledge": 15, "chef": 15, "medical": 15, "health": 10 } },
-                { "text": "為了不辜負長輩心意，您選擇細細品嚐完這碗濃湯。", "feedback": "【總管 欣慰】這份濃湯雖讓身體感到些許負擔，但您顧全大局的體貼，讓長輩感到溫暖。", "expr": "normal", "effects": { "health": -10, "family": 15, "virtue": 10 } },
-                { "text": "賞賜總管，並將此湯轉賜給府中其他辛勞的僕婦。", "feedback": "【總管 感恩】您懂得將資源做最好的分配，這份大度讓後宅眾人對您更加死心塌地。", "expr": "happy", "effects": { "reputation": 20, "power": 15, "chef": 10 } }
-            ]
-        },
-        {
-            "category": "醫療決策", "character": "太醫 張大人",
-            "story": ["「夫人，小主子若含乳姿勢不對，只含住乳頭會導致微血管破損流血，切莫輕忽。」"],
-            "question": "面對哺乳初期可能遭遇的疼痛，您的處理方針是？",
-            "options": [
-                { "text": "虛心請教太醫正確的姿勢，並耐心引導寶寶。", "feedback": "【太醫 撫鬚】夫人好學不倦！調整姿勢後，過程變得順利且溫馨。", "expr": "happy", "effects": { "knowledge": 20, "doctor": 15, "medical": 15 } },
-                { "text": "忍著疼痛，堅信這是成為母親必須經歷的磨練。", "feedback": "【太醫 嘆息】夫人慈母心腸令人動容。雖然強忍帶來了不適，但羈絆更深了。", "expr": "shocked", "effects": { "health": -15, "family": 20, "bond": 15 } },
-                { "text": "命人準備柔軟的羊脂膏，並讓醫女隨侍在側協助。", "feedback": "【太醫 點頭】夫人思慮周全，善用資源與人力，展現了主母的從容。", "expr": "normal", "effects": { "reputation": 10, "power": 15, "health": 5 } }
-            ]
-        },
-        {
-            "category": "新生兒作息", "character": "醫女 蘇氏",
-            "story": ["「夫人，小少爺近日日夜顛倒，白天睡得沉，夜裡卻精神百倍地哭鬧。」"],
-            "question": "為了幫助寶寶建立日夜作息，您決定如何調整環境？",
-            "options": [
-                { "text": "白天拉開窗簾讓陽光灑入，夜晚則點上微弱的燭光。", "feedback": "【蘇醫女 欣喜】您透過自然的光線變化幫助孩子適應了日夜規律，母子倆都獲得了更好的休息。", "expr": "happy", "effects": { "knowledge": 15, "medic": 20, "medical": 15, "health": 10 } },
-                { "text": "親自抱著孩子在庭院走動，用溫暖的懷抱安撫他入睡。", "feedback": "【蘇醫女 柔聲】您選擇用最直接的愛來包容孩子的不安。這份親密的陪伴成為了最美好的回憶。", "expr": "happy", "effects": { "bond": 20, "family": 15, "health": -10 } },
-                { "text": "嚴格規定下人夜間不得發出聲響，白日則需維持日常喧鬧。", "feedback": "【蘇醫女 敬畏】您立下明確的規矩，府內作息變得井然有序，少爺也逐漸適應了環境。", "expr": "normal", "effects": { "reputation": 15, "power": 15, "medic": -5 } }
-            ]
-        }
-    ];
-
-    // =============== 新增 50 題專業產科衛教題庫 ===============
+    // =============== 大量產科衛教題庫 (超過50題，涵蓋孕產各階段) ===============
     const obstetricEducationQuestions = [
-        { category:"孕期營養與飲食", question:"孕婦懷孕期間應如何維持良好營養？", options:["只增加甜食攝取","均衡攝取六大類食物","完全避免蛋白質","減少所有水分攝取"], answer:1, explanation:"孕期需要均衡營養以支持胎兒成長與母體健康。" },
-        { category:"孕期營養與飲食", question:"孕期若需補充葉酸，主要能預防胎兒的何種問題？", options:["神經管缺損","低體重","巨大兒","先天性心臟病"], answer:0, explanation:"葉酸對胎兒神經管發育至關重要，可預防神經管缺損。" },
-        { category:"孕期營養與飲食", question:"為了促進鐵質吸收，孕婦攝取含鐵食物時宜搭配何種維生素？", options:["維生素A","維生素B群","維生素C","維生素D"], answer:2, explanation:"維生素C能將三價鐵還原為二價鐵，大幅促進腸道對鐵質的吸收。" },
-        { category:"孕期營養與飲食", question:"孕期為預防便祕，飲食上應特別注意何種營養素的攝取？", options:["脂肪","膳食纖維與水分","精緻澱粉","高鹽食物"], answer:1, explanation:"充足的膳食纖維與水分能促進腸胃蠕動，預防孕期常見的便祕。" },
+        // 孕期
+        { category:"孕期營養", question:"孕期為預防胎兒神經管缺損，最需要補充哪種營養素？", options:["維生素C","葉酸","鈣質","鐵質"], answer:1, explanation:"葉酸對胎兒早期神經管發育至關重要，建議孕前及孕早期補充。" },
+        { category:"孕期營養", question:"孕婦若有貧血現象，補充鐵劑時建議搭配何種飲品以促進吸收？", options:["牛奶","熱茶","柳橙汁(含維生素C)","咖啡"], answer:2, explanation:"維生素C能促進腸道對鐵質的吸收，而茶與咖啡中的單寧酸會阻礙吸收。" },
+        { category:"產前檢查", question:"妊娠糖尿病的常規篩檢通常安排在懷孕第幾週？", options:["10-12週","16-20週","24-28週","32-36週"], answer:2, explanation:"多數孕婦在24至28週時進行口服葡萄糖耐受測試(OGTT)。" },
+        { category:"產前檢查", question:"孕婦進行超音波檢查測量「頸部透明帶」主要為了篩檢何種疾病？", options:["地中海貧血","唐氏症","妊娠高血壓","巨嬰症"], answer:1, explanation:"第一孕期唐氏症篩檢會結合超音波測量胎兒頸部透明帶厚度及母體血清檢驗。" },
+        { category:"胎動觀察", question:"初產婦通常在懷孕幾週時開始感覺到初次胎動？", options:["10-12週","18-20週","26-28週","34週以後"], answer:1, explanation:"初產婦約在18-20週感覺到胎動，經產婦則可能提早至16週。" },
+        { category:"妊娠不適", question:"懷孕後期孕婦仰臥時容易出現頭暈、血壓下降，這是因為？", options:["缺氧","增大的子宮壓迫下腔靜脈","血糖過低","子宮收縮"], answer:1, explanation:"仰臥性低血壓症候群肇因於下腔靜脈受壓迫，建議孕婦採取左側臥姿以改善血液回流。" },
+        { category:"妊娠不適", question:"為減輕懷孕初期的孕吐不適，下列哪項衛教建議最合適？", options:["完全禁食","多吃流質且高油脂的熱湯","少量多餐，早晨起床吃些乾餅乾","劇烈運動促進消化"], answer:2, explanation:"少量多餐、避免空腹、攝取乾性醣類（如蘇打餅）有助於緩解晨吐。" },
+        { category:"妊娠併發症", question:"妊娠毒血症（子癇前症）的典型三大症狀為何？", options:["高血壓、蛋白尿、全身性水腫","低血壓、頻尿、抽筋","發燒、咳嗽、破水","心悸、手抖、失眠"], answer:0, explanation:"子癇前症好發於懷孕20週後，特徵為高血壓合併蛋白尿，且常伴隨病理性水腫。" },
         
-        { category:"產前檢查", question:"一般的例行性產檢中，初期多久需進行一次產檢？", options:["一週一次","兩週一次","四週一次","半年一次"], answer:2, explanation:"懷孕28週前，一般建議每四週進行一次例行性產前檢查。" },
-        { category:"產前檢查", question:"唐氏症篩檢通常建議在懷孕的哪一個階段進行？", options:["初期及中期","後期","臨產前","產後"], answer:0, explanation:"第一孕期及第二孕期皆有針對唐氏症的篩檢項目，以及早評估風險。" },
-        { category:"產前檢查", question:"超音波檢查在產檢中的主要目的為何？", options:["確認胎兒性別供挑選","評估胎兒大小、位置及構造","治療胎兒疾病","減少孕婦孕吐"], answer:1, explanation:"超音波主要用於評估胎兒生長發育狀況、羊水量及胎盤位置。" },
+        // 生產
+        { category:"生產徵兆", question:"真正的陣痛（True Labor）具備哪種特徵？", options:["疼痛僅限於下腹部","休息或走動後疼痛會減輕","陣痛頻率變規律，間隔縮短且強度增加","不會導致子宮頸擴張"], answer:2, explanation:"真陣痛具備規律性、強度增加且無法藉由休息緩解，並伴隨子宮頸擴張與變薄。" },
+        { category:"生產徵兆", question:"所謂的「落紅」，其呈現的狀態通常為何？", options:["大量鮮紅色如月經般的出血","伴隨黏液的粉紅色或暗紅色分泌物","清澈如水狀的液體","黃綠色濃稠分泌物"], answer:1, explanation:"落紅是子宮頸變薄變軟時微血管破裂，混和子宮頸黏液排出的微量血絲。" },
+        { category:"生產準備", question:"孕婦若發現陰道流出清澈且無法控制的水狀液體，最可能的情況是？", options:["尿失禁","破水（羊膜破裂）","正常陰道分泌物增加","落紅"], answer:1, explanation:"破水會有無法控制的液體流出，有感染及臍帶脫垂風險，需立即就醫。" },
+        { category:"生產方式", question:"自然產相較於剖腹產，對新生兒有一項獨特的益處是？", options:["保證頭型絕對完美","產道擠壓有助於排出肺部羊水，降低呼吸窘迫","能完全避免黃疸","出生體重較重"], answer:1, explanation:"自然產的產道擠壓過程，能幫助新生兒排出呼吸道內的羊水，建立自主呼吸。" },
         
-        { category:"孕期不適處理", question:"孕吐（害喜）最常發生在懷孕的哪一個時期？", options:["第一孕期(前三個月)","第二孕期","第三孕期","產褥期"], answer:0, explanation:"孕吐主要因人絨毛膜促性腺激素(hCG)升高，多發生在懷孕前三個月。" },
-        { category:"孕期不適處理", question:"為緩解孕吐，飲食上建議採取何種方式？", options:["暴飲暴食","少量多餐，避免油膩","多吃辛辣刺激食物","完全禁食"], answer:1, explanation:"少量多餐、清淡飲食，並避免空腹，能有效減輕孕吐的不適。" },
-        { category:"孕期不適處理", question:"孕後期常出現下肢水腫，下列何種做法有助於緩解？", options:["長時間站立","穿著緊身衣物","休息時抬高下肢","減少喝水到極致"], answer:2, explanation:"抬高下肢可促進靜脈回流，減輕下肢水腫狀況。" },
-        { category:"孕期不適處理", question:"孕婦若發生腿部抽筋，通常與缺乏何種礦物質有關？", options:["鐵","鈣","鋅","鈉"], answer:1, explanation:"孕期鈣質需求增加，若攝取不足或吸收不良易導致腿部抽筋。" },
+        // 產後
+        { category:"產後惡露", question:"產後初期（前1-3天）排出的惡露，正常應為什麼顏色？", options:["鮮紅色（血性惡露）","粉褐色（漿液性惡露）","黃白色（白色惡露）","清澈無色"], answer:0, explanation:"產後1-3天為血性惡露(紅色)，4-10天為漿液性(粉褐)，10天後轉為白色惡露。" },
+        { category:"產後惡露", question:"若產婦產後一週，惡露突然從白色變回大量鮮紅色且有大血塊，這可能代表？", options:["子宮恢復極佳","產後大出血或子宮復舊不全的警訊","正常的月經來潮","飲食過於清淡"], answer:1, explanation:"惡露顏色倒退且量大，是產後出血或胎盤殘留、子宮收縮不良的危險徵兆，需立即就醫。" },
+        { category:"子宮復舊", question:"產後為了促進子宮收縮與復原，最自然且被鼓勵的做法是？", options:["絕對臥床一個月","頻繁且盡早開始親自哺乳","每天進行劇烈腹部重訓","大量飲用人參濃湯"], answer:1, explanation:"嬰兒吸吮乳頭會刺激母體腦下垂體分泌催產素，能有效促進子宮收縮，預防產後出血。" },
+        { category:"傷口照護", question:"自然產的會陰傷口，產後建議24小時後可採取何種護理方式以促進癒合？", options:["冰敷","塗抹雙氧水","溫水坐浴","用力揉洗"], answer:2, explanation:"產後24小時內可冰敷減輕腫痛；24小時後採溫水坐浴可促進局部血液循環，加速傷口癒合。" },
+        { category:"母乳哺育", question:"初乳量雖少，但對新生兒極為重要，其最大價值在於？", options:["熱量與脂肪最高","富含水分能解渴","富含分泌型IgA抗體與免疫細胞","味道最甜能安撫情緒"], answer:2, explanation:"初乳被稱為嬰兒的第一劑天然疫苗，含有豐富的抗體，能保護腸道免受病原體侵襲。" },
+        { category:"母乳哺育", question:"正確的含乳姿勢（Latch on）特徵為何？", options:["寶寶嘴巴呈O型，只含住乳頭","寶寶嘴巴張得很大，含住乳頭及大部分乳暈，下巴貼緊乳房","吸吮時發出極大嘖嘖聲","媽媽感到乳頭劇烈疼痛"], answer:1, explanation:"正確含乳需含住大部分乳暈，利用牙齦與舌頭擠壓輸乳竇，若只含乳頭會導致破皮與疼痛。" },
+        { category:"產後憂鬱", question:"產婦產後出現短暫的情緒低落、易哭泣（Baby Blues），通常何時會自然緩解？", options:["持續數年","兩週內","六個月後","必須依賴藥物才會好"], answer:1, explanation:"產後情緒低落(Baby Blues)多因荷爾蒙驟降與疲勞引起，通常在產後兩週內會自然消退。" },
+        { category:"產後憂鬱", question:"若產婦持續出現嚴重失眠、強烈無價值感，甚至有傷害寶寶的念頭，應懷疑？", options:["只是太累了不用理會","產後憂鬱症 (Postpartum Depression)","產後精神分裂","妊娠高血壓"], answer:1, explanation:"持續兩週以上且影響生活功能，伴隨負面念頭，是典型的產後憂鬱症，需積極尋求醫療與心理支持。" },
         
-        { category:"胎動觀察", question:"初產婦通常在懷孕約幾週時會開始感覺到胎動？", options:["8-10週","18-20週","28-30週","36週以後"], answer:1, explanation:"初產婦一般在18-20週左右能感受到如腸子蠕動般的初次胎動。" },
-        { category:"胎動觀察", question:"孕婦居家自我監測胎動，若發現胎動明顯減少，應如何處置？", options:["自行服藥","平躺觀察幾天再說","立即就醫檢查","用力拍打腹部喚醒"], answer:2, explanation:"胎動減少可能是胎兒窘迫的警訊，應盡速就醫由專業人員評估。" },
-        { category:"胎動觀察", question:"一般建議每日何時測量胎動最為適宜？", options:["睡著後","飯後或安靜休息時","劇烈運動中","洗澡時"], answer:1, explanation:"飯後血糖升高或安靜休息時，胎動通常較為明顯，適合進行測量。" },
-        
-        { category:"妊娠糖尿病衛教", question:"妊娠糖尿病篩檢通常在懷孕幾週時進行？", options:["12-16週","24-28週","32-36週","臨盆時"], answer:1, explanation:"常規的妊娠糖尿病篩檢多安排在懷孕24至28週之間進行。" },
-        { category:"妊娠糖尿病衛教", question:"患有妊娠糖尿病的孕婦，其胎兒最容易出現何種併發症？", options:["巨嬰症(大於4000克)","侏儒症","無腦兒","連體嬰"], answer:0, explanation:"母體高血糖會通過胎盤，刺激胎兒過度生長，導致巨嬰症。" },
-        { category:"妊娠糖尿病衛教", question:"妊娠糖尿病孕婦的飲食控制原則，下列何者正確？", options:["絕對禁食碳水化合物","多吃精緻甜點","定時定量，控制總醣量","只吃肉類不吃蔬菜"], answer:2, explanation:"應由營養師指導，定時定量並控制總醣類攝取，以平穩血糖。" },
-        { category:"妊娠糖尿病衛教", question:"妊娠糖尿病多數產婦在生產後的血糖狀況為何？", options:["會終身依賴胰島素","多數產後血糖會恢復正常","一定會立刻轉為第一型糖尿病","完全不需要再追蹤"], answer:1, explanation:"多數產後會恢復，但未來罹患第二型糖尿病風險較高，仍需定期追蹤。" },
-        
-        { category:"妊娠高血壓注意事項", question:"妊娠高血壓通常定義為懷孕幾週後，血壓高於140/90 mmHg？", options:["10週","20週","30週","38週"], answer:1, explanation:"妊娠高血壓是指懷孕20週後才出現的高血壓症狀。" },
-        { category:"妊娠高血壓注意事項", question:"若妊娠高血壓合併蛋白尿與全身性水腫，稱為何種疾病？", options:["子癇前症(妊娠毒血症)","妊娠糖尿病","前置胎盤","植入性胎盤"], answer:0, explanation:"合併蛋白尿等器官受損跡象即為子癇前症，需嚴密監控母胎安全。" },
-        { category:"妊娠高血壓注意事項", question:"子癇前症孕婦若出現何種症狀，應警覺病情惡化並立即就醫？", options:["輕微頻尿","視力模糊、嚴重頭痛或上腹痛","食慾增加","胎動頻繁"], answer:1, explanation:"嚴重頭痛、視力模糊或右上腹痛是子癇前症惡化(可能轉為子癇症)的危險徵兆。" },
-        
-        { category:"孕期運動", question:"對於無併發症的健康孕婦，孕期運動的建議為何？", options:["絕對臥床安胎","可進行中等強度的規律運動","鼓勵從事極限極限運動","只能進行深呼吸"], answer:1, explanation:"規律中等強度運動(如散步、孕婦瑜珈)有助於體力維持與順產。" },
-        { category:"孕期運動", question:"孕婦運動時若出現下列何種情況，應立即停止並就醫？", options:["輕微流汗","心跳稍微加快","陰道出血或規律宮縮","呼吸變深"], answer:2, explanation:"陰道出血、規律宮縮或羊水破裂都是危險徵兆，須立刻停止並就醫。" },
-        { category:"孕期運動", question:"懷孕中後期，應盡量避免何種姿勢的運動？", options:["側躺","站立","長時間平躺","坐姿"], answer:2, explanation:"長時間平躺可能壓迫下腔靜脈，導致仰臥性低血壓及胎兒血液灌流不足。" },
-        
-        { category:"孕期安全用藥", question:"孕期用藥安全分級中，哪一級代表對胎兒有明確的致畸胎風險，絕對禁用？", options:["A級","B級","C級","X級"], answer:3, explanation:"FDA分級中，X級藥物對胎兒危險性已證實大於益處，孕婦絕對禁用。" },
-        { category:"孕期安全用藥", question:"孕婦若不慎感冒發燒，最正確的處理方式為？", options:["自行購買成藥服用","使用偏方發汗","尋求醫師診治並告知懷孕","硬撐不吃任何藥"], answer:2, explanation:"孕期生病應由醫師評估，開立對胎兒安全的藥物，不宜自行服藥或硬撐。" },
-        { category:"孕期安全用藥", question:"懷孕期間使用中藥補品，應注意什麼？", options:["中藥很溫和，可隨意多吃","需經合格中醫師把脈，依體質開立","完全禁止觸碰任何中藥","只要是補氣的都可以吃"], answer:1, explanation:"中藥亦有藥性，部分活血化瘀藥物可能引起宮縮，需經專業中醫師評估。" },
-        
-        { category:"生產準備", question:"為準備生產，孕婦應提早準備的「待產包」中，不包含下列何者？", options:["產婦免洗內褲及產褥墊","新生兒出院衣物","高跟鞋與緊身牛仔褲","健保卡與孕婦健康手冊"], answer:2, explanation:"待產包應以產婦產後舒適及新生兒必需品為主，高跟鞋與緊身衣物不適合產後穿著。" },
-        { category:"生產準備", question:"拉梅茲呼吸法(Lamaze)的主要目的為何？", options:["讓胎兒提早出生","減輕產婦對分痛的恐懼與疼痛感知","代替麻醉藥物達到完全無痛","幫助產婦睡著"], answer:1, explanation:"拉梅茲呼吸法透過轉移注意力與肌肉放鬆，協助產婦減輕待產時的疼痛感。" },
-        { category:"生產準備", question:"會陰按摩通常建議在懷孕幾週後開始進行，以增加會陰彈性？", options:["懷孕初期","懷孕20週","懷孕34週以後","陣痛開始時"], answer:2, explanation:"懷孕後期(約34週後)進行會陰按摩，有助於增加組織彈性，降低生產撕裂傷機率。" },
-        
-        { category:"待產徵兆", question:"所謂的「落紅(Show)」，是指什麼現象？", options:["大量鮮血如月經湧出","混有微量子宮頸黏液的粉紅色或暗紅色分泌物","羊水破裂","強烈的腹部絞痛"], answer:1, explanation:"落紅是子宮頸變薄變軟時微血管破裂，混和黏液排出的微量血絲，是產兆之一。" },
-        { category:"待產徵兆", question:"真正的陣痛(True labor)與假性陣痛的最大區別為何？", options:["真陣痛只痛在背部","真陣痛頻率會越來越規律，且強度增強","假陣痛會導致子宮頸全開","休息或改變姿勢真陣痛就會消失"], answer:1, explanation:"真陣痛具有規律性、時間縮短、強度增加，且無法藉由休息或改變姿勢緩解。" },
-        { category:"待產徵兆", question:"若孕婦發現有清澈水狀液體從陰道不受控制地流出，這可能是什麼現象？", options:["尿失禁","落紅","破水(羊膜破裂)","白帶增加"], answer:2, explanation:"不受控的清澈液體流出極可能是破水，此時需盡速就醫以防感染及臍帶脫垂。" },
-        { category:"待產徵兆", question:"第一胎的產婦，通常建議何時前往醫院待產？", options:["一感覺到肚子緊緊的","落紅一點點時","規則陣痛約每3-5分鐘一次，持續1-2小時","羊水沒破都不用去"], answer:2, explanation:"初產婦產程較長，通常建議規則陣痛達到3-5分鐘一次時再前往醫院。" },
-        
-        { category:"自然產與剖腹產衛教", question:"自然產相較於剖腹產，對新生兒有一項顯著的好處是？", options:["新生兒頭型絕對完美","通過產道擠壓有助於排出肺部羊水","完全不會有黃疸","出生體重會比較重"], answer:1, explanation:"自然產過程中產道的擠壓，能幫助胎兒排出肺部羊水，降低呼吸窘迫風險。" },
-        { category:"自然產與剖腹產衛教", question:"下列何種情況通常會被列為剖腹產的醫療適應症？", options:["孕婦怕痛","胎位不正(如臀位、橫位)","胎兒體重2800克","預產期當天尚未陣痛"], answer:1, explanation:"胎位不正會增加自然產風險，通常建議採剖腹產以確保母胎安全。" },
-        { category:"自然產與剖腹產衛教", question:"無痛分娩(減痛分娩)通常採用哪一種麻醉方式？", options:["全身麻醉","硬脊膜外麻醉(Epidural)","局部浸潤麻醉","吸入性麻醉"], answer:1, explanation:"無痛分娩多採硬脊膜外麻醉，能有效阻斷痛覺傳導，但保留產婦用力的知覺。" },
-        
-        { category:"產後恢復", question:"產婦產後排出的「惡露」，其顏色正常的變化順序應為何？", options:["白色->紅色->黃色","紅色->漿液性(粉紅/棕色)->白色","透明->紅色->黑色","黃色->綠色->白色"], answer:1, explanation:"惡露會隨著子宮復原，從初期的紅色(血性)，轉為漿液性(粉褐)，最後變為白色。" },
-        { category:"產後恢復", question:"為促進產後子宮收縮與復原，最自然有效的方法是？", options:["一直平躺不動","大量飲用人參湯","親自哺餵母乳","每天進行高強度重訓"], answer:2, explanation:"寶寶吸吮乳頭會刺激母體分泌催產素，能有效促進子宮收縮與復原。" },
-        { category:"產後恢復", question:"自然產的會陰傷口，產後可採取何種方式促進血液循環與癒合？", options:["冰敷一個月","溫水坐浴(盆浴)","用力搓洗傷口","塗抹大量來路不明藥膏"], answer:1, explanation:"產後24小時後可開始溫水坐浴，促進局部血液循環，減輕疼痛並加速傷口癒合。" },
-        { category:"產後恢復", question:"凱格爾運動(骨盆底肌運動)對產婦的主要益處是？", options:["減少落紅","預防及改善產後尿失禁與骨盆腔鬆弛","增加母乳量","治療孕吐"], answer:1, explanation:"凱格爾運動能強化骨盆底肌肉，有效預防產後常見的應力性尿失禁。" },
-        
-        { category:"母乳哺餵", question:"初乳雖然量少，但對新生兒極為重要，其主因為何？", options:["含糖量最高","富含抗體(IgA)與免疫細胞","能讓嬰兒睡最久","味道最甜"], answer:1, explanation:"初乳被稱為嬰兒的第一劑疫苗，富含分泌型IgA抗體，能保護腸道免受感染。" },
-        { category:"母乳哺餵", question:"判斷嬰兒是否有喝到足夠母乳，最客觀的指標是？", options:["嬰兒哭泣的頻率","母乳擠出來的顏色","嬰兒每日的尿布量(排尿量)","母親乳房的大小"], answer:2, explanation:"觀察尿布量(如出生一週後每日約有6片重重的濕尿布)是評估奶量是否足夠的客觀指標。" },
-        { category:"母乳哺餵", question:"為預防乳腺炎，哺乳媽媽應注意？", options:["限制飲水","穿著極緊身的內衣","按需哺乳，避免乳汁過度淤積","減少哺乳次數"], answer:2, explanation:"頻繁且有效地排空乳房(按需哺乳)是預防乳腺阻塞與乳腺炎的關鍵。" },
-        { category:"母乳哺餵", question:"正確的含乳姿勢應包含下列何項特徵？", options:["寶寶只含住乳頭","寶寶嘴巴張大，含住乳頭及大部分乳暈","寶寶下巴遠離乳房","吸吮時會發出嘖嘖的彈舌聲"], answer:1, explanation:"正確含乳需讓寶寶嘴張大含住大部分乳暈，下巴貼緊乳房，才不會造成乳頭破皮。" },
-        
-        { category:"新生兒照護", question:"新生兒臍帶護理的重點為何？", options:["保持乾燥清潔","每天塗抹大量乳液保濕","用透氣膠帶緊緊包紮","發現微量血絲立刻用力擦拭"], answer:0, explanation:"臍帶應保持乾燥與清潔，多數在出生後一至兩週內會自然乾燥脫落。" },
-        { category:"新生兒照護", question:"預防嬰兒猝死症候群(SIDS)，應建議嬰兒採取何種睡姿？", options:["趴睡","側睡","仰睡","坐在推車上睡"], answer:2, explanation:"醫學界強烈建議一歲以下嬰兒應「仰睡」，可大幅降低嬰兒猝死症的風險。" },
-        { category:"新生兒照護", question:"生理性黃疸通常在新生兒出生後何時最為明顯？", options:["出生第一天","出生第3至5天","滿月時","三個月大"], answer:1, explanation:"生理性黃疸多在出生後第2-3天出現，第4-5天達高峰，約一至兩週後消退。" },
-        
-        { category:"產後心理健康", question:"產婦產後出現情緒低落、易哭泣(Postpartum blues)，通常會持續多久？", options:["終身","幾天到兩週內自然緩解","半年","一年以上"], answer:1, explanation:"產後情緒低落(Baby blues)極為常見，多數在產後兩週內會因荷爾蒙穩定與適應而自行緩解。" },
-        { category:"產後心理健康", question:"若產婦產後持續出現嚴重失眠、無價值感甚至有傷害自己或嬰兒的念頭，應懷疑為？", options:["產後情緒低落","產後憂鬱症(Postpartum depression)","產褥熱","妊娠糖尿病"], answer:1, explanation:"嚴重且持續的情緒障礙及負面念頭是產後憂鬱症的特徵，需尋求專業醫療與心理支持。" }
+        // 新生兒
+        { category:"新生兒黃疸", question:"生理性黃疸通常在新生兒出生後何時達到高峰？", options:["出生第一天","出生後第4至5天","滿月時","三個月大"], answer:1, explanation:"生理性黃疸多在出生後第2-3天出現，第4-5天達高峰，約一至兩週後消退。" },
+        { category:"新生兒睡眠", question:"為了預防嬰兒猝死症候群（SIDS），一歲以下的嬰兒應採取何種睡姿最安全？", options:["趴睡","側睡","仰睡","坐在汽車座椅上睡"], answer:2, explanation:"醫學界強烈建議嬰兒應「仰睡」，並保持嬰兒床淨空（無鬆軟棉被、枕頭），可大幅降低SIDS風險。" },
+        { category:"臍帶照護", question:"新生兒臍帶護理的核心原則為何？", options:["每天塗抹大量保濕乳液","保持乾燥與清潔，觀察有無紅腫異味","用透氣膠帶緊緊密封包紮","一有結痂立刻用力摳掉"], answer:1, explanation:"臍帶應保持乾燥通風，洗澡後用酒精或生理食鹽水清潔根部，通常1-2週會自然乾燥脫落。" },
+        { category:"預防感染", question:"照顧新生兒前，最基本且最能有效預防感染的措施是？", options:["戴上雙層外科手套","落實正確的洗手步驟","全身噴灑高濃度酒精","讓房間保持密不透風"], answer:1, explanation:"徹底洗手（濕洗手或酒精乾洗手）是阻斷病原體傳播、保護新生兒最簡單且有效的方法。" },
+        { category:"新生兒哭鬧", question:"當新生兒哭鬧時，下列哪項是照顧者『絕對禁止』的行為？", options:["檢查尿布是否濕了","嘗試親餵或給予安撫奶嘴","因為焦躁而用力搖晃嬰兒","輕柔地抱起並發出噓聲安撫"], answer:2, explanation:"用力搖晃嬰兒會導致「嬰兒搖晃症候群(SBS)」，造成嚴重的腦部損傷甚至死亡。" }
     ];
 
-    // 動態將衛教題庫轉換為 RPG 選項格式
+    // 動態將衛教題庫轉換為 RPG 選項格式，由專業醫療 NPC 發問
     function generateEduQuestion(raw) {
+        // 大幅增加太醫與醫女的比例
         const roles = [
-            { c: "丫鬟 春桃", pool: "maid" },
-            { c: "膳房 總管", pool: "chef" },
-            { c: "太醫 張大人", pool: "doctor" },
-            { c: "醫女 蘇氏", pool: "medic" }
+            { c: "太醫 張大人", pool: "doctor" }, { c: "太醫 張大人", pool: "doctor" },
+            { c: "醫女 蘇氏", pool: "medic" }, { c: "醫女 蘇氏", pool: "medic" },
+            { c: "丫鬟 春桃", pool: "maid" }, { c: "膳房 總管", pool: "chef" }
         ];
         let roleObj = roles[Math.floor(Math.random() * roles.length)];
         
@@ -445,20 +368,20 @@
             let isCorrect = (idx === raw.answer);
             return {
                 text: optText,
-                feedback: (isCorrect ? "【理解正確】 " : "【觀念釐清】 ") + raw.explanation,
+                feedback: (isCorrect ? "【理解正確】\n" : "【觀念釐清】\n") + raw.explanation,
                 expr: isCorrect ? "happy" : "shocked",
-                effects: isCorrect ? { knowledge: 10, medical: 5 } : { knowledge: 5 } // 即使選錯也給予微量知識鼓勵學習
+                // 修改數值系統，增加知識與新生兒健康
+                effects: isCorrect ? { knowledge: 10, babyHealth: 5, medical: 5 } : { knowledge: 5, babyHealth: -5 } 
             };
         });
 
-        // 確保選項每次出現時順序會被打亂
         mappedOptions = shuffle(mappedOptions);
 
         return {
             category: raw.category,
             character: roleObj.c,
-            location: ['侯府臥房','庭院','書閣','太醫院'][Math.floor(Math.random()*4)],
-            story: ["「夫人，關於" + raw.category + "，近來大家有些討論，想請教您的看法。」", "（孕產衛教挑戰）"],
+            location: ['侯府臥房','太醫院','庭院'][Math.floor(Math.random()*3)],
+            story: ["「夫人，關於『" + raw.category + "』的護理重點，微臣/奴婢想與您確認一下觀念。」", "（請選擇最符合現代產科衛教標準的處置方式）"],
             question: raw.question,
             options: mappedOptions
         };
@@ -468,10 +391,10 @@
         let generatedQuestions = obstetricEducationQuestions.map(q => generateEduQuestion(q));
         generatedQuestions = shuffle(generatedQuestions);
         
-        let p_maid = generatedQuestions.filter(q => q.character.includes('丫鬟'));
-        let p_chef = generatedQuestions.filter(q => q.character.includes('膳房'));
-        let p_doc = generatedQuestions.filter(q => q.character.includes('太醫'));
-        let p_med = generatedQuestions.filter(q => q.character.includes('醫女'));
+        let p_maid = generatedQuestions.filter(q => q.pool === 'maid');
+        let p_chef = generatedQuestions.filter(q => q.pool === 'chef');
+        let p_doc = generatedQuestions.filter(q => q.pool === 'doctor');
+        let p_med = generatedQuestions.filter(q => q.pool === 'medic');
 
         // 防呆補充
         if(p_maid.length===0) p_maid = [generateEduQuestion(obstetricEducationQuestions[0])];
@@ -480,53 +403,48 @@
         if(p_med.length===0) p_med = [generateEduQuestion(obstetricEducationQuestions[3])];
 
         activePools = { maid: p_maid, chef: p_chef, doctor: p_doc, medic: p_med };
-        console.log("自由模式衛教題庫已自動擴充與分配。");
     }
 
     let activePools = {};
 
     function resetPools() {
-        let pool = externalQuestions.length > 0 ? externalQuestions : fallbackQuestions;
-        let p_maid = pool.filter(q => q.character && (q.character.includes('丫鬟') || q.character.includes('春桃')));
-        let p_chef = pool.filter(q => q.character && (q.character.includes('膳房') || q.character.includes('總管')));
-        let p_doc = pool.filter(q => q.character && (q.character.includes('太醫') || q.character.includes('張')));
-        let p_med = pool.filter(q => q.character && (q.character.includes('醫女') || q.character.includes('蘇')));
+        // 第一輪使用特製的 7 題主線產科衛教，之後若不夠再自動生成
+        let initialStoryQuestions = obstetricEducationQuestions.slice(0, 15).map(q => generateEduQuestion(q));
+        let p_maid = initialStoryQuestions.filter(q => q.character.includes('丫鬟'));
+        let p_chef = initialStoryQuestions.filter(q => q.character.includes('膳房'));
+        let p_doc = initialStoryQuestions.filter(q => q.character.includes('太醫'));
+        let p_med = initialStoryQuestions.filter(q => q.character.includes('醫女'));
 
-        if(p_maid.length===0) p_maid = [fallbackQuestions[0]];
-        if(p_chef.length===0) p_chef = [fallbackQuestions[1]];
-        if(p_doc.length===0) p_doc = [fallbackQuestions[2]];
-        if(p_med.length===0) p_med = [fallbackQuestions[3]];
+        if(p_maid.length===0) p_maid = [generateEduQuestion(obstetricEducationQuestions[0])];
+        if(p_chef.length===0) p_chef = [generateEduQuestion(obstetricEducationQuestions[1])];
+        if(p_doc.length===0) p_doc = [generateEduQuestion(obstetricEducationQuestions[2])];
+        if(p_med.length===0) p_med = [generateEduQuestion(obstetricEducationQuestions[3])];
 
-        activePools = { maid: shuffle(p_maid.slice()), chef: shuffle(p_chef.slice()), doctor: shuffle(p_doc.slice()), medic: shuffle(p_med.slice()) };
+        activePools = { maid: shuffle(p_maid), chef: shuffle(p_chef), doctor: shuffle(p_doc), medic: shuffle(p_med) };
     }
 
     async function loadQuestions() {
         loadGlobalData();
-        try {
-            let res = await fetch('questions.json');
-            if (res.ok) { let data = await res.json(); if (data.length > 0) externalQuestions = data; }
-        } catch (error) { console.warn("使用內建備用題庫。"); externalQuestions = fallbackQuestions.slice(); } 
-        finally {
-            resetPools(); 
-            if(globalData.playCount > 0) { player.knowledge += 10; player.reputation += 10; }
-            currentState = STATES.TITLE; 
-        }
+        // 直接使用內建產科題庫生成
+        resetPools(); 
+        if(globalData.playCount > 0) { player.knowledge += 10; player.babyHealth += 10; }
+        currentState = STATES.TITLE; 
     }
 
     const introStage = {   
         character: "內心獨白", location: "侯府臥房",
         story: [
-            "【序章：大宋侯府的清晨】",
-            "晨光微露，透過雕花窗櫺灑在錦繡被面上。昨日歷經生死，我終於平安誕下了嫡出小少爺。",
-            "這偌大的侯府，規矩森嚴，人心難測。產後這七日，不僅是身子的調養，更是重新確立後宅威信的關鍵。",
-            "府內上下，無數雙眼睛正盯著我。身為主母，我該如何走出第一步？"
+            "【序章：產褥期的考驗】",
+            "晨光微露，我終於平安誕下了嫡出小少爺。",
+            "產後的身體百廢待舉，不僅要面對傷口疼痛、惡露排出，新生兒的哺育與照護更是一大挑戰。",
+            "太醫院與醫女已奉命前來協助。這七日，我必須徹底掌握產科照護與育兒衛教知識，確保母子安康。"
         ],
-        question: "【立威抉擇】您決定以何種作風開啟這七日的調養與管家之路？",
+        question: "【照護方針】您決定以何種態度面對接下來的孕產衛教學習？",
         options: [
-            { text: "【醫術】研讀醫理，科學調養守護母子平安。", feedback: "【系統】解鎖醫術路線。您決定以理服人，用知識武裝自己。", expr: 'happy', effects: { medical: 20, knowledge: 15, doctor: 10 } },
-            { text: "【權謀】恩威並施，藉機敲打下人樹立威嚴。", feedback: "【系統】解鎖權謀路線。您眼神凌厲，決定趁機整頓後宅規矩。", expr: 'normal', effects: { power: 20, reputation: 15, chef: 5 } },
-            { text: "【親情】萬事以孩兒為重，親力親為不假手他人。", feedback: "【系統】解鎖親情路線。看著繈褓中的骨肉，您滿眼溫柔，母愛油然而生。", expr: 'happy', effects: { family: 20, bond: 15, maid: 10 } },
-            { text: "【賢德】以和為貴，體恤下人辛勞，溫和待人。", feedback: "【系統】解鎖賢德路線。您決定以德服人，讓府內外皆稱頌您的賢良。", expr: 'happy', effects: { virtue: 20, health: 10, medic: 10 } }
+            { text: "【醫學專業】嚴格遵循太醫指導，科學照護。", feedback: "【系統】您選擇了專業路線。知識就是守護健康最好的武器。", expr: 'happy', effects: { medical: 20, knowledge: 15, doctor: 10 } },
+            { text: "【親密育兒】親力親為，以建立母子羈絆為首要。", feedback: "【系統】您選擇了親情路線。母愛能給予新生兒最大的安全感。", expr: 'happy', effects: { family: 20, bond: 15, babyHealth: 5 } },
+            { text: "【資源管理】調度侯府下人，妥善分配照護工作。", feedback: "【系統】您選擇了管理路線。讓專業的人做專業的事，維持產婦休養。", expr: 'normal', effects: { power: 20, babyHealth: 10, chef: 5 } },
+            { text: "【身心平衡】兼顧自己產後的心理健康與身體恢復。", feedback: "【系統】您選擇了平衡路線。有健康的母親，才有健康的嬰兒。", expr: 'happy', effects: { virtue: 20, health: 15, medic: 10 } }
         ]
     };
 
@@ -536,24 +454,24 @@
         let r = player.routes; let highestRoute = Object.keys(r).reduce((a, b) => r[a] > r[b] ? a : b);
         let result = null;
 
-        if (player.health < 30) {
-            result = { id: '【積勞成疾】', title: "【積勞成疾】", desc: "您將所有精力都傾注在侯府與孩子身上，雖然保全了體面，卻忽略了自己。太醫強烈建議您必須長年臥床休養。這是一條充滿犧牲的道路，也是您身為主母的覺悟。", color: "#e74c3c" };
+        if (player.knowledge < 40 || player.babyHealth < 40) {
+            result = { id: '【知識匱乏的風險】', title: "【照護不周的隱患】", desc: "由於缺乏正確的產科衛教觀念，您與寶寶在產褥期遭遇了許多不必要的風險。太醫強烈建議您必須重新學習照護知識，以免落下病根。", color: "#e74c3c" };
         } else if (r[highestRoute] >= 30) {
             if (highestRoute === 'power') {
-                result = { id: '【權傾侯府】', title: "【權傾侯府】", desc: "經過這七日的歷練，您展現出卓越的管家手腕與非凡的氣度。恩威並施之下，侯府上下對您心服口服。您成為了這深宅大院中，無人能撼動的當家主母，引領侯府走向繁榮。", color: "#8e44ad" };
-                if(!globalData.achievements['iron_lady'].unlocked) { globalData.achievements['iron_lady'].unlocked = true; saveGlobalData(); }
+                result = { id: '【侯府健康管理者】', title: "【侯府健康管理者】", desc: "您卓越的資源調度能力，讓侯府的產褥期照護井然有序。您不僅自己恢復良好，更建立了一套完善的育兒標準流程。", color: "#8e44ad" };
             } else if (highestRoute === 'medical') {
-                result = { id: '【妙手神醫】', title: "【妙手神醫】", desc: "您悉心研讀醫理，將科學的調養之道與傳統智慧完美融合。您的細心與好學，不僅讓母子安康，這份珍貴的照護經驗更傳承給了府中的下人，在京城醫界留下了佳話。", color: "#27ae60" };
+                result = { id: '【杏林衛教大使】', title: "【杏林衛教大使】", desc: "您對產科護理、母乳哺育與新生兒急救的知識已達專業水準。您不僅完美守護了母子安康，更將這份現代衛教觀念推廣給了更多人。", color: "#27ae60" };
                 if(!globalData.achievements['god_hand'].unlocked) { globalData.achievements['god_hand'].unlocked = true; saveGlobalData(); }
             } else if (highestRoute === 'family') {
-                result = { id: '【母慈子孝】', title: "【母慈子孝】", desc: "您將滿腔的溫柔與心血都傾注在孩兒身上。母子連心的羈絆，成為您在這深宅中最堅實的依靠。對您而言，權勢名利皆如浮雲，唯有伴隨孩子平安長大，才是最純粹的幸福。", color: "#f39c12" };
+                result = { id: '【親情無限羈絆】', title: "【母嬰情深】", desc: "您將滿腔的心血傾注在親職照護上。透過肌膚接觸與細心哺育，您與寶寶建立了無可取代的深厚連結，新生兒各項發展指標極佳。", color: "#f39c12" };
+                if(!globalData.achievements['max_bond'].unlocked) { globalData.achievements['max_bond'].unlocked = true; saveGlobalData(); }
             } else {
-                result = { id: '【賢德傳家】', title: "【賢德傳家】", desc: "您以和為貴，寬厚待人，這七日來與後宅眾人建立了深厚的信任。您用包容與智慧化解了種種難題，讓原本冷清的侯府充滿了人情味。您成為了府中人人敬重的賢德主母。", color: "#3498db" };
+                result = { id: '【全能守護母嬰】', title: "【身心康健之母】", desc: "您完美平衡了產後身體恢復與心理調適。以溫和包容的心態面對育兒挑戰，讓整個後宅充滿了正向健康的氛圍。", color: "#3498db" };
             }
-        } else if (player.knowledge >= 80 && player.reputation >= 80 && player.bond >= 80 && totalAffection >= 250) {
-            result = { id: '【一代宗婦】', title: "【一代宗婦】", desc: "您完美掌握育兒知識，母子連心，名滿京城且後宅和睦。老夫人直接將掌家之權全權交予您，成為侯府最輝煌的主母典範！", color: "#d4af37" };
+        } else if (player.knowledge >= 80 && player.babyHealth >= 80 && player.bond >= 80) {
+            result = { id: '【全能守護母嬰】', title: "【模範產婦】", desc: "您以滿分的知識與行動力完成了七日衛教挑戰！母體恢復神速，新生兒健康優良，太醫院對您的表現讚不絕口！", color: "#d4af37" };
         } else {
-            result = { id: '【漸入佳境】', title: "【漸入佳境】", desc: "這七日雖有波折，但您與寶寶都在努力適應。雖然尚未建立絕對的權威或聲望，但來日方長，一切都會越來越好。", color: "#4caf50" };
+            result = { id: '【漸入佳境】', title: "【漸入佳境】", desc: "這七日的照護學習雖有波折，但您已掌握了基本的衛教知識。接下來的育兒之路還很長，請繼續努力學習！", color: "#4caf50" };
         }
 
         if(!globalData.unlockedEndings.includes(result.id)) {
@@ -760,7 +678,7 @@
     function applyEffects(effects) {
         let offsetY = ch/2 - 100; let hasPos = false; let hasNeg = false;
         if (effects) {
-            const sm = { 'knowledge': '智慧', 'health': '體力', 'reputation': '聲望', 'bond': '羈絆', 'virtue': '賢德', 'power': '權謀', 'medical': '醫術', 'family': '親情' };
+            const sm = { 'knowledge': '衛教知識', 'health': '母體健康', 'babyHealth': '嬰兒健康', 'bond': '親子連結', 'virtue': '賢德', 'power': '權謀', 'medical': '醫術', 'family': '親情' };
             for (let key in sm) {
                 if (effects[key]) {
                     if (['virtue', 'power', 'medical', 'family'].includes(key)) player.routes[key] += effects[key];
@@ -841,7 +759,7 @@
         
         ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
         ctx.fillStyle = '#d4af37'; ctx.font = `bold 22px ${FONT_FAMILY}`; ctx.textAlign = 'left';
-        ctx.fillText("◇ 府邸記要 ◇", pX + 20, pY + 35); ctx.shadowBlur = 0;
+        ctx.fillText("◇ 母嬰康健指標 ◇", pX + 20, pY + 35); ctx.shadowBlur = 0;
 
         let drawBar = (label, val, yOffset, color) => {
             ctx.fillStyle = '#f0ebd8'; ctx.font = `18px ${FONT_FAMILY}`; ctx.textAlign = 'left'; ctx.fillText(label, pX + 20, pY + yOffset);
@@ -849,19 +767,19 @@
             ctx.fillStyle = color; ctx.beginPath(); ctx.roundRect(pX + 70, pY + yOffset - 13, (val / 100) * (pW - 90), 12, 6); ctx.fill();
         };
 
-        drawBar("慧心", player.knowledge, 65, player.knowledge > 30 ? '#587e91' : '#8b1e28');
-        drawBar("元氣", player.health, 95, player.health > 30 ? '#d48a9a' : '#8b1e28');
-        drawBar("清譽", player.reputation, 125, player.reputation > 30 ? '#d4af37' : '#8b1e28');
-        drawBar("羈絆", player.bond, 155, player.bond > 30 ? '#82c0d9' : '#8b1e28');
+        drawBar("知識", player.knowledge, 65, player.knowledge > 40 ? '#587e91' : '#8b1e28');
+        drawBar("母體", player.health, 95, player.health > 40 ? '#d48a9a' : '#8b1e28');
+        drawBar("嬰兒", player.babyHealth, 125, player.babyHealth > 40 ? '#d4af37' : '#8b1e28');
+        drawBar("連結", player.bond, 155, player.bond > 40 ? '#82c0d9' : '#8b1e28');
 
-        ctx.fillStyle = '#d4af37'; ctx.font = `bold 18px ${FONT_FAMILY}`; ctx.fillText("主母作風", pX + 20, pY + 195);
+        ctx.fillStyle = '#d4af37'; ctx.font = `bold 18px ${FONT_FAMILY}`; ctx.fillText("育兒作風", pX + 20, pY + 195);
         ctx.fillStyle = '#ccc'; ctx.font = `15px ${FONT_FAMILY}`;
-        ctx.fillText(`賢德: ${player.routes.virtue} | 權謀: ${player.routes.power} | 醫術: ${player.routes.medical} | 親情: ${player.routes.family}`, pX + 20, pY + 220);
+        ctx.fillText(`身心: ${player.routes.virtue} | 管理: ${player.routes.power} | 醫學: ${player.routes.medical} | 親密: ${player.routes.family}`, pX + 20, pY + 220);
 
         ctx.strokeStyle = 'rgba(212, 175, 55, 0.2)'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(pX + 10, pY + 240); ctx.lineTo(pX + pW - 10, pY + 240); ctx.stroke();
 
-        ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.fillText("後宅人心", pX + 20, pY + 270);
+        ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.fillText("後宅照護團隊", pX + 20, pY + 270);
 
         let startY = pY + 310;
         for (const key in player.affections) {
@@ -1043,14 +961,14 @@
         } else { sysBtn.style.display = 'none'; }
 
         if (currentState === STATES.LOADING) {
-             ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0,0,cw,ch); ctx.textAlign = 'center'; ctx.fillStyle = '#d4af37'; ctx.font = `bold 30px ${FONT_FAMILY}`; ctx.fillText("讀取卷宗中...", cw/2, ch/2);
+             ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0,0,cw,ch); ctx.textAlign = 'center'; ctx.fillStyle = '#d4af37'; ctx.font = `bold 30px ${FONT_FAMILY}`; ctx.fillText("載入產科知識庫中...", cw/2, ch/2);
         }
         else if (currentState === STATES.TITLE) {
             ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,cw,ch); ctx.textAlign = 'center'; ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 20;
             ctx.fillStyle = '#f0ebd8'; let ts = Math.max(40, Math.min(80, cw * 0.08)); ctx.font = `bold ${ts}px ${FONT_FAMILY}`; ctx.fillText("汴京娘子調養記", cw/2, ch/2 - 120); ctx.shadowBlur = 0;
-            ctx.fillStyle = '#d4af37'; ctx.font = `${ts*0.35}px ${FONT_FAMILY}`; ctx.fillText("— 產後照護RPG —", cw/2, ch/2 - 50);
-            if(globalData.playCount > 0) { ctx.fillStyle = '#82c0d9'; ctx.font = `18px ${FONT_FAMILY}`; ctx.fillText(`【多周目繼承】初始智慧+10, 聲望+10`, cw/2, ch/2); }
-            drawButton(ctx, 'btn_start', {x: cw/2 - 120, y: ch/2 + 80, w: 240, h: 60}, globalData.playCount > 0 ? "重啟人生" : "踏入侯府");
+            ctx.fillStyle = '#d4af37'; ctx.font = `${ts*0.35}px ${FONT_FAMILY}`; ctx.fillText("— 產科衛教專業版 —", cw/2, ch/2 - 50);
+            if(globalData.playCount > 0) { ctx.fillStyle = '#82c0d9'; ctx.font = `18px ${FONT_FAMILY}`; ctx.fillText(`【多周目繼承】初始知識+10, 嬰兒健康+10`, cw/2, ch/2); }
+            drawButton(ctx, 'btn_start', {x: cw/2 - 120, y: ch/2 + 80, w: 240, h: 60}, globalData.playCount > 0 ? "重啟產褥期" : "進入產褥期照護");
         }
         else if (currentState === STATES.DAY_TRANSITION) {
             ctx.fillStyle = 'rgba(10,10,12,0.8)'; ctx.fillRect(0,0,cw,ch);
@@ -1062,38 +980,37 @@
             ctx.fillStyle = '#d4af37'; ctx.font = `bold 52px ${FONT_FAMILY}`; ctx.fillText(titleText, cw/2, ch/2 - 80); ctx.shadowBlur = 0;
             ctx.fillStyle = '#f0ebd8'; ctx.font = `24px ${FONT_FAMILY}`;
             let lines = wrapText(ctx, eventText, Math.min(650, cw - 60)); lines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 10 + i*36));
-            ctx.globalAlpha = (Math.sin(time * 3) + 1) * 0.5 * globalAlpha; ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.fillText("◇ 點擊開啟今日篇章 ◇", cw/2, ch/2 + 150); ctx.globalAlpha = globalAlpha;
+            ctx.globalAlpha = (Math.sin(time * 3) + 1) * 0.5 * globalAlpha; ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.fillText("◇ 點擊開啟今日衛教篇章 ◇", cw/2, ch/2 + 150); ctx.globalAlpha = globalAlpha;
             clickZones.push({ id: 'screen_next_day', x: 0, y: 0, w: cw, h: ch });
         }
         else if (currentState === STATES.MODE_SELECT) {
             drawDatePanel(ctx); drawStatsPanel(ctx);
             let options = [
-                { text: "【結束體驗】進行最終結算，觀看您的主母結局。" },
-                { text: "【繼續孕期照護】進入無盡衛教模式，持續面對產科挑戰。" }
+                { text: "【重新體驗七日衛教模式】重新開始產褥期挑戰。" },
+                { text: "【進入自由照護模式】開啟無限孕產衛教挑戰。" }
             ];
-            renderDialog(ctx, "七日衛教體驗完成", "您已成功度過了最艱難的產前/產後初期。接下來，您打算...", options);
+            renderDialog(ctx, "【七日衛教完成】", "恭喜夫人完成產後七日照護學習。接下來，您打算...", options);
         }
         else if (currentState === STATES.FREE_MENU) {
             drawDatePanel(ctx); drawStatsPanel(ctx);
             let options = [
-                { text: "【繼續管理侯府】處理帳目，樹立威嚴" },
-                { text: "【深入研究醫術】研讀醫書，精進調養" },
-                { text: "【培養NPC關係】巡視後宅，施恩下人" },
-                { text: "【照顧孩子成長】親自哺育，增進羈絆" },
-                { text: "【處理府內事件】隨機應變，處變不驚" },
-                { text: "【結束照護體驗】觀看最終人生結局" }
+                { text: "【產科回診】前往太醫院請教醫療觀念" },
+                { text: "【育兒照護】向醫女學習新生兒與產婦照護" },
+                { text: "【膳食調養】吩咐膳房準備發奶與恢復藥膳" },
+                { text: "【親子時光】在臥房親自哺育並安撫寶寶" },
+                { text: "【結束照護體驗】觀看最終人生結業報告" }
             ];
-            renderDialog(ctx, "侯府日常 (照護模式)", "您將持續面對隨機產科衛教挑戰。今日您打算：", options);
+            renderDialog(ctx, "侯府日常 (無盡衛教模式)", "您將持續面對隨機產科衛教挑戰。今日您打算進行哪方面的學習：", options);
         }
         else if (currentState === STATES.STORY) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, currentStage.character, currentStage.story[currentStoryLine], null); }
         else if (currentState === STATES.QUESTION) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, currentStage.character || "內心抉擇", currentStage.question, currentStage.options); }
-        else if (currentState === STATES.FEEDBACK) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, "命運的迴響", selectedOptionFeedback, null); }
+        else if (currentState === STATES.FEEDBACK) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, "衛教結果", selectedOptionFeedback, null); }
         else if (currentState === STATES.END) {
             ctx.fillStyle = 'rgba(0,0,0,0.9)'; ctx.fillRect(0,0,cw,ch); ctx.textAlign = 'center'; 
             ctx.fillStyle = currentEnding.color; ctx.font = `bold 56px ${FONT_FAMILY}`; ctx.fillText(currentEnding.title, cw/2, ch/2 - 130);
             ctx.fillStyle = '#f0ebd8'; ctx.font = `22px ${FONT_FAMILY}`; 
             let endLines = wrapText(ctx, currentEnding.desc, Math.min(750, cw - 60)); endLines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 40 + i*36));
-            drawButton(ctx, 'btn_restart', {x: cw/2 - 240, y: ch/2 + 140, w: 220, h: 60}, "再次體驗");
+            drawButton(ctx, 'btn_restart', {x: cw/2 - 240, y: ch/2 + 140, w: 220, h: 60}, "再次體驗衛教");
             drawButton(ctx, 'btn_home', {x: cw/2 + 20, y: ch/2 + 140, w: 220, h: 60}, "返回標題畫面");
         }
 
@@ -1131,17 +1048,16 @@
         }
         else if (currentState === STATES.FREE_MENU && clicked && clicked.id.startsWith('opt_')) {
             let idx = parseInt(clicked.id.split('_')[1]);
-            if (idx === 5) { 
+            if (idx === 4) { 
                 currentEnding = determineEnding(); globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy');
                 return;
             }
 
             let effects = {}; let role = 'maid'; let location = '侯府';
-            if (idx === 0) { effects = { reputation: 5, power: 5 }; role = 'chef'; location = '侯府正廳'; }
-            else if (idx === 1) { effects = { knowledge: 5, medical: 5 }; role = 'doctor'; location = '書閣'; }
-            else if (idx === 2) { effects = { virtue: 5 }; role = ['maid','chef','doctor','medic'][Math.floor(Math.random()*4)]; location = '庭院'; }
-            else if (idx === 3) { effects = { bond: 5, family: 5 }; role = 'medic'; location = '侯府臥房'; }
-            else if (idx === 4) { effects = { health: -5 }; role = ['maid','chef','doctor','medic'][Math.floor(Math.random()*4)]; location = '侯府'; }
+            if (idx === 0) { effects = { babyHealth: 5, power: 5 }; role = 'doctor'; location = '太醫院'; }
+            else if (idx === 1) { effects = { knowledge: 5, medical: 5 }; role = 'medic'; location = '書閣'; }
+            else if (idx === 2) { effects = { virtue: 5 }; role = 'chef'; location = '廚房'; }
+            else if (idx === 3) { effects = { bond: 5, family: 5 }; role = 'maid'; location = '侯府臥房'; }
             applyEffects(effects);
 
             if (!activePools[role] || activePools[role].length === 0) refillFreeModePools();
@@ -1172,17 +1088,22 @@
         else if (currentState === STATES.MODE_SELECT && clicked && clicked.id.startsWith('opt_')) {
             let idx = parseInt(clicked.id.split('_')[1]);
             if (idx === 0) {
-                currentEnding = determineEnding(); globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy');
+                // 重新體驗七日衛教模式
+                currentDay = 1; gameMode = "tutorial"; player.knowledge = 40; player.health = 60; player.babyHealth = 60; player.bond = 50;
+                player.routes = { virtue: 0, power: 0, medical: 0, family: 0 }; resetPools();
+                for(let key in player.affections) { player.affections[key].target = 20; player.affections[key].current = 20; player.affections[key].status = "陌生"; }
+                globalAlpha = 0; currentStage = introStage; mainCharacter.setEmotion('normal'); currentState = STATES.STORY;
             } else {
+                // 進入自由照護模式
                 gameMode = "free"; globalAlpha = 0; currentState = STATES.DAY_TRANSITION;
             }
         }
         else if (currentState === STATES.END && clicked) {
             if (clicked.id === 'btn_restart') {
-                currentDay = 1; gameMode = "tutorial"; player.knowledge = 50; player.health = 60; player.reputation = 50; player.bond = 50;
+                currentDay = 1; gameMode = "tutorial"; player.knowledge = 40; player.health = 60; player.babyHealth = 60; player.bond = 50;
                 player.routes = { virtue: 0, power: 0, medical: 0, family: 0 }; resetPools();
                 for(let key in player.affections) { player.affections[key].target = 20; player.affections[key].current = 20; player.affections[key].status = "陌生"; }
-                if(globalData.playCount > 0) { player.knowledge+=10; player.reputation+=10; }
+                if(globalData.playCount > 0) { player.knowledge+=10; player.babyHealth+=10; }
                 globalAlpha = 0; currentStage = introStage; mainCharacter.setEmotion('normal'); currentState = STATES.STORY;
             } else if (clicked.id === 'btn_home') { window.location.reload(); }
         }
