@@ -38,12 +38,30 @@
 </div>
 
 <script>
+    // --- 1. Canvas 初始化 ---
     const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d', { alpha: false }); 
+    const ctx = canvas ? canvas.getContext('2d') : null; 
+
+    if (canvas && ctx) {
+        console.log("Canvas初始化成功", canvas.width, canvas.height);
+    } else {
+        console.error("Canvas初始化失敗！找不到元件或無法建立 Context。");
+    }
+
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+        CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+            r = r || 0;
+            this.moveTo(x + r, y);
+            this.arcTo(x + w, y, x + w, y + h, r);
+            this.arcTo(x + w, y + h, x, y + h, r);
+            this.arcTo(x, y + h, x, y, r);
+            this.arcTo(x, y, x + w, y, r);
+            return this;
+        };
+    }
 
     const FONT_FAMILY = '"Kaiti", "標楷體", "Times New Roman", serif';
 
-    // 自適應滿版系統
     let dpr = window.devicePixelRatio || 1;
     let cw = window.innerWidth;
     let ch = window.innerHeight;
@@ -51,20 +69,22 @@
     function resize() {
         cw = window.innerWidth;
         ch = window.innerHeight;
-        canvas.width = cw * dpr;
-        canvas.height = ch * dpr;
+        if(canvas) {
+            canvas.width = cw * dpr;
+            canvas.height = ch * dpr;
+        }
     }
     window.addEventListener('resize', resize);
     resize();
 
-    // 遊戲狀態機 (簡化為明快的劇情流)
+    // --- 2. 遊戲狀態機 (簡化為線性劇情流) ---
     const STATES = { LOADING: 0, START: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6 };
     let currentState = STATES.LOADING; 
     let currentDay = 1;
     let currentStage = null;
     let currentStoryLine = 0;
     let selectedOptionFeedback = "";
-    
+
     let mouse = { x: cw/2, y: ch/2, targetX: cw/2, targetY: ch/2, isDown: false };
     let time = 0, dt = 0, lastTime = 0;
     let clickZones = []; 
@@ -74,10 +94,10 @@
     let bloomColor = '255,255,255';
     let globalAlpha = 1; 
     
-    // 玩家屬性系統
+    // 玩家屬性系統 (保留數值供內部計算，但不直接以成績單顯示)
     let player = { 
         knowledge: 50,    
-        health: 60,  // 剛生完孩子，初始體力較低     
+        health: 60,       
         reputation: 50,   
         bond: 50,         
         routes: { virtue: 0, power: 0, medical: 0, family: 0 }, 
@@ -91,15 +111,15 @@
 
     let currentEnding = null;
 
-    // --- 7日主線劇情排程 ---
+    // --- 3. 每日情境設定 ---
     const daysData = [
-        { day: "產後第一天", weather: "sunny", location: "侯府臥房", role: "maid", event: "初為人母，您抱著剛出生的孩兒，心中充滿溫暖。但初乳的分泌與照護立刻成為了首要挑戰。" },
-        { day: "產後第二天", weather: "cloudy", location: "廚房", role: "chef", event: "產後體虛，膳房送來了各式大補之物。如何在發奶與恢復中取得平衡，考驗著您的智慧。" },
-        { day: "產後第三天", weather: "rainy", location: "太醫院", role: "doctor", event: "今日太醫來請平安脈。哺乳時的疼痛與身心變化，需要專業的醫理來調適。" },
-        { day: "產後第四天", weather: "snowy", location: "庭院", role: "medic", event: "氣溫驟降。小少爺似乎有些焦躁不安，醫女前來協助您解讀寶寶的各種信號。" },
-        { day: "產後第五天", weather: "sunny", location: "侯府臥房", role: "maid", event: "寶寶的成長速度驚人，尿布與睡眠的規律開始改變，後宅的下人們也在觀察您的應對。" },
-        { day: "產後第六天", weather: "cloudy", location: "夜晚侯府", role: "doctor", event: "夜半時分，寶寶頻繁討奶，疲憊感襲來。這是對母親體力與意志力的最大考驗。" },
-        { day: "產後第七天", weather: "sunny", location: "庭院", role: "medic", event: "轉眼已至第七日，您逐漸適應了母親的身份。今日的總結，將決定您在侯府的最終地位。" }
+        { day: "產後第一天", weather: "sunny", location: "侯府臥房", role: "maid", event: "初為人母，您抱著剛出生的孩兒，心中充滿溫暖。但初期的照護與身心調適立刻成為了首要任務。" },
+        { day: "產後第二天", weather: "cloudy", location: "廚房", role: "chef", event: "產後體虛，膳房送來了各式大補之物。如何在滋補與身體承受度之間取得平衡，考驗著您的智慧。" },
+        { day: "產後第三天", weather: "rainy", location: "太醫院", role: "doctor", event: "今日太醫來請平安脈。面對身體的種種變化，需要專業的醫理來調適。" },
+        { day: "產後第四天", weather: "snowy", location: "庭院", role: "medic", event: "氣溫驟降。小少爺似乎有些焦躁不安，醫女前來與您一同探討育兒之法。" },
+        { day: "產後第五天", weather: "sunny", location: "侯府臥房", role: "maid", event: "寶寶的成長速度驚人，生活規律開始改變，後宅的下人們也在觀察您的應對方式。" },
+        { day: "產後第六天", weather: "cloudy", location: "夜晚侯府", role: "doctor", event: "夜半時分，疲憊感襲來。這是對母親體力與意志力的最大考驗，也是沉澱心靈的時刻。" },
+        { day: "產後第七天", weather: "sunny", location: "庭院", role: "medic", event: "轉眼已至第七日，您逐漸適應了母親與主母的雙重身份。今日的總結，將決定未來的道路。" }
     ];
 
     function shuffle(array) {
@@ -114,46 +134,46 @@
         return array;
     }
 
-    // --- 內建題庫 (包含路線影響) ---
+    // --- 4. 內建備用題庫 (以價值觀取代對錯) ---
     const fallbackQuestions = [
          {
-            "category": "產後調養", "character": "丫鬟 春桃",
-            "story": ["「夫人...初乳又黃又濃，量這麼少，這怎麼夠小少爺塞牙縫呀？」", "【調養小記】：初乳量雖少但富含抗體與生長因子。新生兒胃僅有彈珠大小（5-7ml），初乳絕對足夠。"],
-            "question": "面對春桃的疑慮，夫人該如何回應？",
+            "category": "產婦心理調適", "character": "丫鬟 春桃",
+            "story": ["「夫人，您今日看著窗外的落葉，似乎有些悶悶不樂。是不是奴婢們伺候得不夠周到？」", "【調養小記】：產後由於身心巨變，容易產生低落的情緒。接納自己的情緒，並尋求信任者的陪伴是非常重要的。"],
+            "question": "面對突如其來的低落情緒與丫鬟的關心，您會怎麼做？",
             "options": [
-                { "text": "初乳是抗體精華，這點量足夠了。", "feedback": "【春桃 恍然大悟】這金黃色的初乳竟是給小少爺最好的保護！", "expr": "happy", "effects": { "knowledge": 20, "maid": 20, "medical": 10 } },
-                { "text": "立規矩：主子做事，下人不得多嘴質疑。", "feedback": "【春桃 慌張退下】奴婢知錯，這就去準備毛巾。", "expr": "shocked", "effects": { "reputation": 10, "maid": -5, "power": 15 } },
-                { "text": "擔憂地抱緊孩子，不理會丫鬟，親自哄睡。", "feedback": "您滿心只有孩兒，春桃見狀也不再多言。", "expr": "normal", "effects": { "health": -5, "bond": 15, "family": 15 } }
+                { "text": "微笑著握住春桃的手，聊些開心的家常，轉移注意力。", "feedback": "【春桃 安心】您選擇敞開心扉，這份真誠的交流讓您的心情平靜了下來。", "expr": "happy", "effects": { "health": 10, "maid": 15, "virtue": 15 } },
+                { "text": "立刻振作精神，要求查看近期的侯府帳冊。", "feedback": "【春桃 敬佩】您選擇用責任來掩蓋脆弱。這種雷厲風行的作風讓人敬佩，但也別忘了適時休息。", "expr": "shocked", "effects": { "reputation": 15, "power": 15, "health": -5 } },
+                { "text": "獨自走到搖籃旁，靜靜看著熟睡的孩子，從中汲取力量。", "feedback": "【內心 溫暖】孩子平靜的呼吸聲是最好的安撫，所有的不安都煙消雲散。", "expr": "normal", "effects": { "bond": 15, "family": 15 } }
             ]
         },
         {
-            "category": "飲食調理", "character": "膳房 總管",
-            "story": ["「夫人！這十全大補麻油豬腳湯上面浮著厚油，最是滋補發奶！」", "【調養小記】：產後發奶應多攝取水分與清淡蛋白質。過於油膩的濃湯容易導致乳汁脂肪過高，造成乳腺阻塞。"],
-            "question": "為了順暢發奶且不塞奶，夫人該如何選擇？",
+            "category": "飲食調理與家庭溝通", "character": "膳房 總管",
+            "story": ["「夫人！這十全大補濃湯是老夫人特意吩咐熬製的，最是滋補，您趁熱多喝些！」", "【調養小記】：產後初期腸胃較弱，宜循序漸進地進補，過於濃膩的湯水有時反而難以消化。"],
+            "question": "面對長輩的盛情與這碗濃郁的補湯，夫人該如何抉擇？",
             "options": [
-                { "text": "撇去浮油，告知總管日後多準備清淡魚湯。", "feedback": "【總管 敬佩】清淡湯水好吸收，夫人深諳養生之道！", "expr": "happy", "effects": { "knowledge": 15, "chef": 20, "medical": 10, "health": 10 } },
-                { "text": "為了讓寶寶吃飽，硬著頭皮把這整鍋油膩濃湯喝光。", "feedback": "【總管 欣慰】夫人為少爺犧牲良多。但您隔日塞奶十分痛苦。", "expr": "shocked", "effects": { "health": -15, "family": 15, "bond": 10 } },
-                { "text": "賞賜總管，並溫和地請他分一碗給其他產婦。", "feedback": "【總管 感恩】夫人宅心仁厚，這就去辦。", "expr": "normal", "effects": { "reputation": 20, "virtue": 15, "chef": 10 } }
+                { "text": "溫和地請總管日後多準備清淡高湯，細水長流地調理。", "feedback": "【總管 點頭】您深諳養生之道，清淡的湯水確實讓您的身體感到更加輕盈舒暢。", "expr": "happy", "effects": { "knowledge": 15, "chef": 15, "medical": 15, "health": 10 } },
+                { "text": "為了不辜負長輩心意，您選擇細細品嚐完這碗濃湯。", "feedback": "【總管 欣慰】這份濃湯雖讓身體感到些許負擔，但您顧全大局的體貼，讓長輩感到溫暖。", "expr": "normal", "effects": { "health": -5, "family": 15, "virtue": 10 } },
+                { "text": "賞賜總管，並將此湯轉賜給府中其他辛勞的僕婦。", "feedback": "【總管 感恩】您懂得將資源做最好的分配，這份大度讓後宅眾人對您更加死心塌地。", "expr": "happy", "effects": { "reputation": 20, "power": 15, "chef": 10 } }
             ]
         },
         {
-            "category": "產後調養", "character": "太醫 張大人",
-            "story": ["「夫人，小主子若含乳姿勢不對，只含住乳頭會導致微血管破損流血。」", "【調養小記】：正確含乳應讓寶寶嘴巴張大，含住「大部分的乳暈」，下巴貼緊乳房。"],
-            "question": "為避免乳頭破損，正確的處理方針是？",
+            "category": "產後身體調養", "character": "太醫 張大人",
+            "story": ["「夫人，產後百脈空虛，若有腰酸背痛或是惡露未淨，皆是常理，切莫過於心急。」", "【調養小記】：產後身體的恢復需要時間，保持充足睡眠與愉快的心情，比任何靈丹妙藥都重要。"],
+            "question": "面對身體的疲憊感，您打算如何調整步調？",
             "options": [
-                { "text": "調整姿勢，讓寶寶下巴緊貼乳房，含住大部分乳暈。", "feedback": "【太醫 點頭稱是】大口含住乳暈才能正確擠壓乳腺！", "expr": "happy", "effects": { "knowledge": 20, "doctor": 15, "medical": 15 } },
-                { "text": "這點痛算什麼，做母親的只要寶寶能喝到奶就好。", "feedback": "【太醫 嘆息】夫人慈母心腸，但強忍只會導致嚴重發炎啊。", "expr": "shocked", "effects": { "health": -15, "family": 20, "bond": 15 } },
-                { "text": "微血管破損是下人沒教好，罰負責照顧的奶娘半個月月錢。", "feedback": "【太醫 默然】夫人治府嚴厲，微臣不敢多言。", "expr": "normal", "effects": { "reputation": 10, "doctor": -10, "power": 15 } }
+                { "text": "虛心向太醫請教穴位按摩之法，主動了解自己的身體。", "feedback": "【太醫 撫鬚】夫人好學不倦！您對醫理的認知加深，未來更能從容應對各種狀況。", "expr": "happy", "effects": { "knowledge": 20, "doctor": 20, "medical": 20 } },
+                { "text": "放下身段，將雜事交由下人打理，專心閉目休養。", "feedback": "【太醫 點頭】夫人懂得適時放手。這份從容讓您的身心得到了極大的放鬆，體力逐漸恢復。", "expr": "happy", "effects": { "health": 20, "virtue": 10 } },
+                { "text": "即使疲憊，依然堅持親自翻閱帳冊，維持侯府運作。", "feedback": "【太醫 嘆息】夫人的堅強令人動容。雖然透支了體力，但您在府中的威望達到了頂峰。", "expr": "shocked", "effects": { "health": -10, "reputation": 25, "power": 20 } }
             ]
         },
         {
-            "category": "育兒知識", "character": "醫女 蘇氏",
-            "story": ["「夫人，小主子轉頭舔唇、把小手放進嘴裡，這是『尋乳信號』了。」", "【調養小記】：舔唇、吃手是飢餓的早期信號，若等到嚎啕大哭已是過度飢餓。"],
-            "question": "看到寶寶的早期尋乳信號，夫人該怎麼做？",
+            "category": "嬰幼兒照護", "character": "醫女 蘇氏",
+            "story": ["「夫人，小少爺這會兒一直哭鬧，是不是奴婢哪裡沒伺候好？還是少爺餓了？」", "【調養小記】：嬰兒啼哭是表達需求的方式，除了飢餓，也可能是尿布濕了、太熱或需要安撫。"],
+            "question": "面對焦慮的醫女與哭鬧的孩兒，您會如何處理？",
             "options": [
-                { "text": "趁他情緒安穩、尚未大哭前，趕緊抱過來依需求親餵。", "feedback": "【蘇醫女 欣喜】這時餵奶寶寶情緒穩定，含乳最順利！", "expr": "happy", "effects": { "knowledge": 15, "medic": 20, "medical": 10 } },
-                { "text": "親手為他換上柔軟的新衣，再溫柔地抱入懷中餵食。", "feedback": "【蘇醫女 點頭】夫人對少爺真是無微不至的呵護。", "expr": "happy", "effects": { "bond": 20, "family": 15, "health": 5 } },
-                { "text": "讓下人們先安撫，自己梳妝整理儀容後再端莊地餵奶。", "feedback": "【蘇醫女 提醒】夫人注重主母儀態，但等他哭鬧就難餵了呢。", "expr": "normal", "effects": { "reputation": 15, "power": 10, "medic": -5 } }
+                { "text": "溫和地教導她檢查尿布與衣物，耐心排查原因。", "feedback": "【蘇醫女 敬佩】您耐心的教導不僅安撫了孩兒，也讓下人學到了經驗，主僕間信任更深了。", "expr": "happy", "effects": { "knowledge": 15, "medic": 20, "virtue": 15 } },
+                { "text": "親自將孩子抱入懷中，用母親的溫暖來安撫他。", "feedback": "【內心 滿足】您選擇親力親為，看著孩子在懷中安穩睡去，這份親情羈絆無比珍貴。", "expr": "happy", "effects": { "health": -5, "bond": 20, "family": 15 } },
+                { "text": "讓下人們按規矩行事，自己從旁冷靜觀察指揮。", "feedback": "【蘇醫女 敬畏】您冷靜的指揮展現了主母的氣度，下人們井然有序地完成了照護。", "expr": "normal", "effects": { "reputation": 10, "power": 15, "medic": 5 } }
             ]
         }
     ];
@@ -163,11 +183,31 @@
 
     function resetPools() {
         let pool = externalQuestions.length > 0 ? externalQuestions : fallbackQuestions;
+        
+        let maidPool = pool.filter(q => q.character && (q.character.includes('丫鬟') || q.character.includes('春桃')));
+        let chefPool = pool.filter(q => q.character && (q.character.includes('膳房') || q.character.includes('總管')));
+        let doctorPool = pool.filter(q => q.character && (q.character.includes('太醫') || q.character.includes('張大人')));
+        let medicPool = pool.filter(q => q.character && (q.character.includes('醫女') || q.character.includes('蘇氏')));
+
+        if(maidPool.length === 0 && chefPool.length === 0 && doctorPool.length === 0 && medicPool.length === 0) {
+            let shuffled = shuffle(pool.slice());
+            let chunk = Math.max(1, Math.floor(shuffled.length / 4));
+            maidPool = shuffled.slice(0, chunk);
+            chefPool = shuffled.slice(chunk, chunk*2);
+            doctorPool = shuffled.slice(chunk*2, chunk*3);
+            medicPool = shuffled.slice(chunk*3);
+        }
+
+        if(maidPool.length === 0) maidPool = [fallbackQuestions.find(q=>q.character && q.character.includes('丫鬟')) || fallbackQuestions[0]];
+        if(chefPool.length === 0) chefPool = [fallbackQuestions.find(q=>q.character && q.character.includes('膳房')) || fallbackQuestions[1]];
+        if(doctorPool.length === 0) doctorPool = [fallbackQuestions.find(q=>q.character && q.character.includes('太醫')) || fallbackQuestions[2]];
+        if(medicPool.length === 0) medicPool = [fallbackQuestions.find(q=>q.character && q.character.includes('醫女')) || fallbackQuestions[3]];
+
         activePools = { 
-            maid: shuffle(pool.filter(q => q.character.includes('丫鬟') || q.character.includes('春桃'))), 
-            chef: shuffle(pool.filter(q => q.character.includes('膳房') || q.character.includes('總管'))), 
-            doctor: shuffle(pool.filter(q => q.character.includes('太醫') || q.character.includes('張大人'))), 
-            medic: shuffle(pool.filter(q => q.character.includes('醫女') || q.character.includes('蘇氏'))) 
+            maid: shuffle(maidPool.slice()), 
+            chef: shuffle(chefPool.slice()), 
+            doctor: shuffle(doctorPool.slice()), 
+            medic: shuffle(medicPool.slice()) 
         };
     }
 
@@ -176,9 +216,12 @@
             let res = await fetch('questions.json');
             if (!res.ok) throw new Error("HTTP status " + res.status);
             let data = await res.json();
-            if (data && data.length > 0) externalQuestions = data;
+            if (data && data.length > 0) {
+                externalQuestions = data;
+                console.log("外部題庫載入成功！共載入 " + data.length + " 題。");
+            }
         } catch (error) {
-            console.warn("無法載入外部題庫，使用內建備用題庫。");
+            console.warn("無法載入外部題庫，自動切換至內建備用題庫。", error);
             externalQuestions = fallbackQuestions.slice();
         } finally {
             resetPools(); 
@@ -186,48 +229,67 @@
         }
     }
 
-    // --- 序章設定 ---
+    // --- 5. 序章：人生態度的選擇 ---
     const introStage = {   
         character: "內心獨白",
         location: "侯府臥房",
         story: [
-            "【序章：侯府主母的挑戰】",
-            "我乃大宋名門之女，嫁入這豪門侯府。昨日歷經生死，終於平安誕下了嫡出小少爺。",
-            "看著這雕樑畫棟的侯府臥房，我知道，真正的挑戰才剛開始。",
-            "產後這七日，不只是調養虛弱的鳳體，更是重新整頓後宅、建立主母威信的關鍵時刻。",
-            "府內上下，無數雙眼睛正盯著我。我必須做出抉擇，確立我未來的道路。"
+            "【序章：新生與責任】",
+            "我乃大宋名門之女，嫁入這豪門侯府。昨日歷經辛苦，終於平安誕下了小少爺。",
+            "看著這雕樑畫棟的侯府臥房，我知道，嶄新的人生篇章才剛剛展開。",
+            "產後這七日，不僅是調養身心的黃金期，更是重新熟悉後宅、建立主母威信的關鍵時刻。",
+            "府內上下都在看著我。我必須做出抉擇，確立我未來的行事作風。"
         ],
-        question: "【立威抉擇】您決定以何種作風開啟這七日的調養與管家之路？",
+        question: "【主母方針】您決定以何種作風開啟這七日的調養與管家之路？",
         options: [
-            { text: "【賢德】以和為貴，溫和對待下人博取美名。", feedback: "您決定以德服人，溫和的氣質讓下人們感到安心。", expr: 'happy', effects: { virtue: 20, health: 10, maid: 10 } },
-            { text: "【權謀】恩威並施，藉機敲打下人樹立威嚴。", feedback: "您眼神凌厲，決定趁機立威，絕不容許後宅有絲毫怠慢。", expr: 'normal', effects: { power: 20, reputation: 10, chef: -5 } },
-            { text: "【醫術】研讀醫理，科學調養守護母子平安。", feedback: "您深知身體才是本錢，決定以科學醫理武裝自己。", expr: 'happy', effects: { medical: 20, knowledge: 10, doctor: 10 } },
-            { text: "【親情】萬事以孩兒為重，親力親為。", feedback: "看著繈褓中的骨肉，您滿眼溫柔，決定將所有心血傾注於他。", expr: 'happy', effects: { family: 20, bond: 10, medic: 5 } }
+            { text: "【賢德】以和為貴，溫和體恤下人，廣結善緣。", feedback: "您決定以德服人，溫和的氣質讓下人們感到無比安心，府內氣氛融洽。", expr: 'happy', effects: { virtue: 20, health: 10, maid: 10 } },
+            { text: "【權謀】恩威並施，賞罰分明，樹立不容侵犯的威嚴。", feedback: "您眼神堅定，決定立下規矩。雖需勞心勞力，但也確保了後宅的井然有序。", expr: 'normal', effects: { power: 20, reputation: 10 } },
+            { text: "【醫術】研讀醫理，相信科學調養，用知識守護母子。", feedback: "您深知身體才是本錢，決定以科學醫理武裝自己，這份好學令人敬佩。", expr: 'happy', effects: { medical: 20, knowledge: 10, doctor: 10 } },
+            { text: "【親情】萬事以孩兒為重，親力親為，享受育兒之樂。", feedback: "看著繈褓中的骨肉，您滿眼溫柔。對您而言，孩子的笑容勝過一切權勢。", expr: 'happy', effects: { family: 20, bond: 10, medic: 5 } }
         ]
     };
 
+    // --- 6. 純劇情式結局 ---
     function determineEnding() {
-        let totalAffection = Object.values(player.affections).reduce((sum, npc) => sum + npc.target, 0);
         let r = player.routes;
         let highestRoute = Object.keys(r).reduce((a, b) => r[a] > r[b] ? a : b);
 
         if (player.health < 30) {
-            return { title: "【積勞成疾】", desc: "您日夜操勞，雖然保全了侯府體面，但自己卻落下病根。太醫強烈建議您必須長年臥床休養...", color: "#e74c3c" };
+            return { 
+                title: "【積勞成疾】", 
+                desc: "您將所有精力都傾注在侯府與孩子身上，雖然保全了體面，卻忽略了自己。太醫強烈建議您必須長年臥床休養。這是一條充滿犧牲的道路，也是您身為主母的覺悟。", 
+                color: "#e74c3c" 
+            };
         }
         
-        if (r[highestRoute] >= 30) {
-            if (highestRoute === 'power') return { title: "【權傾侯府】", desc: "您以鐵腕手段整頓後宅，恩威並施。老夫人放權，您成為侯府說一不二的當家主母！(達成權謀路線)", color: "#8e44ad" };
-            if (highestRoute === 'medical') return { title: "【妙手神醫】", desc: "您精通醫理調養，不僅將小少爺養得白胖，更將這些知識編纂成冊，名滿京城醫界。(達成醫術路線)", color: "#27ae60" };
-            if (highestRoute === 'family') return { title: "【母慈子孝】", desc: "您將所有心血傾注在孩兒身上，母子連心。後宅歲月靜好，您收穫了最純粹的親情與幸福。(達成親情路線)", color: "#f39c12" };
-            if (highestRoute === 'virtue') return { title: "【賢德傳家】", desc: "您以和為貴，寬厚待人。府內外皆稱頌您的賢良淑德，為侯府博得了極高的美名。(達成賢德路線)", color: "#3498db" };
+        if (highestRoute === 'power') {
+            return { 
+                title: "【權傾侯府】", 
+                desc: "經過這七日的歷練，您展現出卓越的管家手腕與非凡的氣度。恩威並施之下，侯府上下對您心服口服。您成為了這深宅大院中，無人能撼動的當家主母，引領侯府走向繁榮。", 
+                color: "#8e44ad" 
+            };
+        } else if (highestRoute === 'medical') {
+            return { 
+                title: "【妙手神醫】", 
+                desc: "您悉心研讀醫理，將科學的調養之道與傳統智慧完美融合。您的細心與好學，不僅讓母子安康，這份珍貴的照護經驗更傳承給了府中的下人，在京城醫界留下了佳話。", 
+                color: "#27ae60" 
+            };
+        } else if (highestRoute === 'family') {
+            return { 
+                title: "【母慈子孝】", 
+                desc: "您將滿腔的溫柔與心血都傾注在孩兒身上。母子連心的羈絆，成為您在這深宅中最堅實的依靠。對您而言，權勢名利皆如浮雲，唯有伴隨孩子平安長大，才是最純粹的幸福。", 
+                color: "#f39c12" 
+            };
+        } else {
+            return { 
+                title: "【賢德夫人】", 
+                desc: "您以和為貴，寬厚待人，這七日來與後宅眾人建立了深厚的信任。您用包容與智慧化解了種種難題，讓原本冷清的侯府充滿了人情味。您成為了府中人人敬重的賢德主母。", 
+                color: "#3498db" 
+            };
         }
-
-        if (player.knowledge >= 80 && player.reputation >= 80 && player.bond >= 80 && totalAffection >= 250) {
-            return { title: "【一代宗婦】", desc: "您完美掌握育兒知識，母子連心，名滿京城且後宅和睦。成為侯府最輝煌的主母典範！", color: "#d4af37" };
-        }
-        return { title: "【漸入佳境】", desc: "這七日雖有波折，但您與寶寶都在努力適應。來日方長，一切都會越來越好。", color: "#4caf50" };
     }
 
+    // --- 粒子特效 ---
     class DustParticle {
         constructor() {
             this.x = Math.random() * cw; this.y = Math.random() * ch;
@@ -248,6 +310,7 @@
     let dustParticles = [];
     for(let i=0; i<40; i++) dustParticles.push(new DustParticle());
 
+    // --- Live2D 渲染引擎 ---
     class ProceduralLive2DCharacter {
         constructor(role, customColors = null) {
             this.role = role; 
@@ -722,7 +785,7 @@
         ctx.fillText(`【大宋宣和元年】`, 110, 55);
         ctx.fillStyle = '#e0e0e0'; ctx.font = `18px ${FONT_FAMILY}`; 
         
-        // 顯示當前場景名稱
+        // 動態顯示當前場景名稱
         let locText = "";
         if(currentDay >= 1 && currentDay <= 7) locText = daysData[currentDay-1].location;
         ctx.fillText(`第${currentDay}天 ‧ ${locText}`, 120, 85);
@@ -826,7 +889,7 @@
         lines.forEach((l, i) => { ctx.fillText(l, 0, startY + i * 24); });
         ctx.restore();
         
-        clickZones.push({ id: id, ...btn });
+        clickZones.push({ id: id, x: btn.x, y: btn.y, w: btn.w, h: btn.h });
     }
 
     function renderDialog(ctx, titleText, contentText, options = null) {
@@ -1043,21 +1106,21 @@
         }
         else if (currentState === STATES.FEEDBACK) {
             drawDatePanel(ctx); drawStatsPanel(ctx);
-            renderDialog(ctx, "調理結果", selectedOptionFeedback, null);
+            renderDialog(ctx, "選擇結果", selectedOptionFeedback, null);
         }
         else if (currentState === STATES.END) {
             ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0,0,cw,ch);
             ctx.textAlign = 'center'; 
-            ctx.fillStyle = currentEnding.color; ctx.font = `bold 46px ${FONT_FAMILY}`; ctx.fillText(currentEnding.title, cw/2, ch/2 - 120);
             
-            ctx.fillStyle = '#fff'; ctx.font = `20px ${FONT_FAMILY}`; 
-            let endLines = wrapText(ctx, currentEnding.desc, Math.min(600, cw - 60));
-            endLines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 50 + i*30));
+            ctx.fillStyle = currentEnding.color; ctx.font = `bold 46px ${FONT_FAMILY}`; 
+            ctx.fillText(currentEnding.title, cw/2, ch/2 - 120);
+            
+            ctx.fillStyle = '#fff'; ctx.font = `22px ${FONT_FAMILY}`; 
+            let endLines = wrapText(ctx, currentEnding.desc, Math.min(700, cw - 60));
+            endLines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 40 + i*40));
 
-            ctx.fillStyle = '#d4af37'; ctx.font = `18px ${FONT_FAMILY}`;
-            ctx.fillText(`結算：智慧 ${player.knowledge} | 體力 ${player.health} | 聲望 ${player.reputation} | 羈絆 ${player.bond}`, cw/2, ch/2 + 60);
-
-            drawButton(ctx, 'btn_restart', {x: cw/2 - 100, y: ch/2 + 100, w: 200, h: 60}, "重新體驗");
+            drawButton(ctx, 'btn_restart', {x: cw/2 - 220, y: ch/2 + 120, w: 200, h: 60}, "再次體驗七日人生");
+            drawButton(ctx, 'btn_home', {x: cw/2 + 20, y: ch/2 + 120, w: 200, h: 60}, "回到首頁");
         }
 
         floatingTexts = floatingTexts.filter(t => t.life > 0); floatingTexts.forEach(t => { t.update(); t.draw(ctx); });
@@ -1081,13 +1144,11 @@
             currentState = STATES.STORY;
         }
         else if (currentState === STATES.DAY_TRANSITION && clicked && clicked.id === 'screen_next_day') {
-            // 進入每日劇情，根據 daysData 取得對應角色
             let dayData = daysData[currentDay - 1];
             let role = dayData.role;
             if (activePools[role] && activePools[role].length > 0) {
                 currentStage = activePools[role].pop();
             } else {
-                // 如果外部題庫不夠用，從 fallback 取一題相應角色的
                 let roleText = role === 'maid' ? '丫鬟' : role === 'chef' ? '總管' : role === 'doctor' ? '太醫' : '醫女';
                 currentStage = fallbackQuestions.find(q => q.character && q.character.includes(roleText)) || fallbackQuestions[0];
             }
@@ -1128,6 +1189,9 @@
             mainCharacter.setEmotion('normal');
             currentState = STATES.STORY;
         }
+        else if (currentState === STATES.END && clicked && clicked.id === 'btn_home') {
+            window.location.reload(); 
+        }
     }
 
     canvas.addEventListener('mousedown', e => {
@@ -1156,7 +1220,6 @@
         }
     });
 
-    // 啟動程式 
     loadQuestions();
     requestAnimationFrame(gameLoop);
 
