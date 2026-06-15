@@ -141,8 +141,9 @@
     }
     window.addEventListener('resize', resize); resize();
 
-    // =============== 變數宣告與初始化修復區塊 ===============
-    const STATES = { LOADING: 0, TITLE: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6, SYSTEM: 7, MODE_SELECT: 8 };
+    // =============== 變數宣告與狀態機 ===============
+    // 新增 STATES.FREE_MENU 用於處理自由模式的每日選項
+    const STATES = { LOADING: 0, TITLE: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6, SYSTEM: 7, MODE_SELECT: 8, FREE_MENU: 9 };
     let currentState = STATES.LOADING; 
     
     let gameMode = "tutorial"; // "tutorial" = 七日衛教體驗, "free" = 自由探索模式
@@ -168,7 +169,7 @@
         }
     };
 
-    // --- 1. 加入洗牌演算法 (Fisher-Yates Shuffle) ---
+    // --- 1. 確保洗牌演算法 (Fisher-Yates Shuffle) 存在 ---
     function shuffle(array) {
         let currentIndex = array.length, randomIndex, temp;
         while (currentIndex !== 0) {
@@ -181,7 +182,7 @@
         return array;
     }
 
-    // --- 2. 宣告並初始化粒子系統 (DustParticle) ---
+    // --- 2. 確保粒子系統 (DustParticle) 初始化存在 ---
     class DustParticle {
         constructor() {
             this.x = Math.random() * cw; this.y = Math.random() * ch;
@@ -219,7 +220,7 @@
         try {
             const saved = localStorage.getItem('bianjing_global');
             if (saved) {
-                const parsed = JSON.parse(saved); // 修復錯字 JSON.json -> JSON.parse
+                const parsed = JSON.parse(saved);
                 globalData.playCount = parsed.playCount || 0;
                 globalData.unlockedEndings = parsed.unlockedEndings || [];
                 if(parsed.achievements) Object.assign(globalData.achievements, parsed.achievements);
@@ -235,7 +236,7 @@
     }
 
     function saveGame() {
-        const saveData = { player, currentDay, currentStage, currentStoryLine };
+        const saveData = { player, currentDay, currentStage, currentStoryLine, gameMode };
         localStorage.setItem('bianjing_save', JSON.stringify(saveData));
         toggleMenu(); showSysMessage("進度已儲存。");
     }
@@ -247,6 +248,7 @@
                 const data = JSON.parse(saved);
                 player = data.player; currentDay = data.currentDay; 
                 currentStage = data.currentStage; currentStoryLine = data.currentStoryLine;
+                if(data.gameMode) gameMode = data.gameMode;
                 toggleMenu(); currentState = STATES.STORY; showSysMessage("進度讀取成功。");
             } else { alert("沒有找到存檔紀錄。"); }
         } catch(e) { alert("讀取失敗。"); }
@@ -486,7 +488,10 @@
             this.scale += (1 - this.scale) * dt * 8; this.y += (0 - this.y) * dt * 8;
         }
 
+        // --- 3. 新增 resetAppearance 方法，並保留 reset 做為雙重保險 ---
         reset() { this.scale = 0.5; this.y = 50; }
+        resetAppearance() { this.reset(); this.setEmotion('normal'); }
+        // =============================================================
 
         draw(ctx, cx, cy, scale, isMini = false) {
             ctx.save(); ctx.translate(cx, cy + (isMini ? 0 : this.y)); ctx.scale(scale * (isMini ? 1 : this.scale), scale * (isMini ? 1 : this.scale));
@@ -858,7 +863,7 @@
             ctx.fillStyle = 'rgba(212, 175, 55, 0.02)'; ctx.fillRect(cw*0.05, ch*0.1, cw*0.25, ch*0.8); ctx.fillRect(cw*0.7, ch*0.1, cw*0.25, ch*0.8);
             ctx.strokeStyle = 'rgba(212, 175, 55, 0.05)'; ctx.lineWidth = 2;
             for(let i=0; i<10; i++) { ctx.strokeRect(cw*0.05, ch*0.1 + i*ch*0.08, cw*0.25, ch*0.08); ctx.strokeRect(cw*0.7, ch*0.1 + i*ch*0.08, cw*0.25, ch*0.08); }
-        } else if (loc.includes('庭院') || loc.includes('花園')) {
+        } else if (loc.includes('庭院') || loc.includes('花園') || loc.includes('侯府')) {
             grad.addColorStop(0, '#0f1a20'); grad.addColorStop(1, '#050a0f'); 
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
             ctx.fillStyle = 'rgba(212, 230, 255, 0.15)'; ctx.beginPath(); ctx.arc(cw*0.8, ch*0.2, Math.min(cw,ch)*0.15, 0, Math.PI*2); ctx.fill();
@@ -894,7 +899,8 @@
 
         ctx.save(); ctx.scale(dpr, dpr); ctx.translate(cameraShake.x, cameraShake.y);
 
-        if ([STATES.DAY_TRANSITION, STATES.TITLE, STATES.END, STATES.LOADING, STATES.MODE_SELECT].includes(currentState)) globalAlpha += (1 - globalAlpha) * dt * 2;
+        // --- 4. 將 FREE_MENU 狀態也納入淡入淡出過渡效果 ---
+        if ([STATES.DAY_TRANSITION, STATES.TITLE, STATES.END, STATES.LOADING, STATES.MODE_SELECT, STATES.FREE_MENU].includes(currentState)) globalAlpha += (1 - globalAlpha) * dt * 2;
         else globalAlpha = 1;
         if (isNaN(globalAlpha)) globalAlpha = 1; ctx.globalAlpha = globalAlpha;
 
@@ -913,7 +919,7 @@
                 else if (cn.includes("蘇氏") || cn.includes("醫女")) activeCharacter = npcs.medic;
                 else activeCharacter = mainCharacter;
             }
-            if (![STATES.DAY_TRANSITION, STATES.TITLE, STATES.END, STATES.LOADING].includes(currentState)) {
+            if (![STATES.DAY_TRANSITION, STATES.TITLE, STATES.END, STATES.LOADING, STATES.FREE_MENU].includes(currentState)) {
                 let charScale = Math.max(1.0, Math.min(cw/600, ch/800) * 2.2);
                 activeCharacter.draw(ctx, cw/2, ch/2 + 100, charScale);
             }
@@ -922,7 +928,7 @@
         clickZones = []; canvas.style.cursor = 'crosshair'; 
 
         const sysBtn = document.getElementById('btn-sys-toggle');
-        if([STATES.TITLE, STATES.DAY_TRANSITION, STATES.STORY, STATES.QUESTION, STATES.FEEDBACK].includes(currentState)) {
+        if([STATES.TITLE, STATES.DAY_TRANSITION, STATES.STORY, STATES.QUESTION, STATES.FEEDBACK, STATES.FREE_MENU].includes(currentState)) {
             sysBtn.style.display = 'block';
         } else { sysBtn.style.display = 'none'; }
 
@@ -957,6 +963,19 @@
             ];
             renderDialog(ctx, "七日衛教體驗完成", "您已成功度過了最艱難的產後初期。接下來，您打算...", options);
         }
+        // --- 5. 新增 FREE_MENU 渲染區塊，提供五種操作選擇 ---
+        else if (currentState === STATES.FREE_MENU) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            let options = [
+                { text: "【繼續管理侯府】處理帳目，樹立威嚴" },
+                { text: "【深入研究醫術】研讀醫書，精進調養" },
+                { text: "【培養NPC關係】巡視後宅，施恩下人" },
+                { text: "【照顧孩子成長】親自哺育，增進羈絆" },
+                { text: "【處理府內事件】隨機應變，處變不驚" },
+                { text: "【結束自由探索】觀看最終人生結局" }
+            ];
+            renderDialog(ctx, "侯府日常", "產後七日已過，您正式開始掌握侯府生活。今日您打算：", options);
+        }
         else if (currentState === STATES.STORY) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, currentStage.character, currentStage.story[currentStoryLine], null); }
         else if (currentState === STATES.QUESTION) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, currentStage.character || "內心抉擇", currentStage.question, currentStage.options); }
         else if (currentState === STATES.FEEDBACK) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, "命運的迴響", selectedOptionFeedback, null); }
@@ -965,7 +984,7 @@
             ctx.fillStyle = currentEnding.color; ctx.font = `bold 56px ${FONT_FAMILY}`; ctx.fillText(currentEnding.title, cw/2, ch/2 - 130);
             ctx.fillStyle = '#f0ebd8'; ctx.font = `22px ${FONT_FAMILY}`; 
             let endLines = wrapText(ctx, currentEnding.desc, Math.min(750, cw - 60)); endLines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 40 + i*36));
-            drawButton(ctx, 'btn_restart', {x: cw/2 - 240, y: ch/2 + 140, w: 220, h: 60}, "再次體驗七日");
+            drawButton(ctx, 'btn_restart', {x: cw/2 - 240, y: ch/2 + 140, w: 220, h: 60}, "再次體驗");
             drawButton(ctx, 'btn_home', {x: cw/2 + 20, y: ch/2 + 140, w: 220, h: 60}, "返回標題畫面");
         }
 
@@ -983,31 +1002,49 @@
             currentDay = 1; gameMode = "tutorial"; globalAlpha = 0; currentStage = introStage; mainCharacter.setEmotion('normal'); currentState = STATES.STORY;
         }
         else if (currentState === STATES.DAY_TRANSITION && clicked && clicked.id === 'screen_next_day') {
-            let role, location;
             if (gameMode === "free") {
-                let roles = ['maid', 'chef', 'doctor', 'medic'];
-                let locations = ['侯府臥房', '廚房', '太醫院', '庭院'];
-                let rIdx = Math.floor(Math.random() * roles.length);
-                role = roles[rIdx];
-                location = locations[rIdx];
+                // 自由模式不直接進入劇情，而是進入菜單選擇
+                globalAlpha = 0; currentState = STATES.FREE_MENU;
             } else {
-                role = daysData[currentDay - 1].role;
-                location = daysData[currentDay - 1].location;
+                let role = daysData[currentDay - 1].role;
+                let location = daysData[currentDay - 1].location;
+                if (!activePools[role] || activePools[role].length === 0) resetPools(); // 題庫抽空時補充
+                currentStage = activePools[role].pop();
+                currentStage.location = location;
+                
+                // 修復：安全呼叫 resetAppearance()
+                if(mainCharacter && typeof mainCharacter.resetAppearance === 'function') {
+                    mainCharacter.resetAppearance(); 
+                } else if(mainCharacter && typeof mainCharacter.reset === 'function') {
+                    mainCharacter.reset();
+                } else { console.warn("mainCharacter 缺少重置外觀方法。"); }
+                
+                currentStoryLine = 0; currentState = STATES.STORY;
             }
-            
-            if (!activePools[role] || activePools[role].length === 0) resetPools(); // 題庫抽空時補充
-            
+        }
+        // --- 6. 新增對 STATES.FREE_MENU 選項的點擊處理邏輯 ---
+        else if (currentState === STATES.FREE_MENU && clicked && clicked.id.startsWith('opt_')) {
+            let idx = parseInt(clicked.id.split('_')[1]);
+            if (idx === 5) { // 結束自由探索
+                currentEnding = determineEnding(); globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy');
+                return;
+            }
+
+            // 依據玩家選擇套用基本屬性增益並決定出現的 NPC 池
+            let effects = {}; let role = 'maid'; let location = '侯府';
+            if (idx === 0) { effects = { reputation: 5, power: 5 }; role = 'chef'; location = '侯府正廳'; }
+            else if (idx === 1) { effects = { knowledge: 5, medical: 5 }; role = 'doctor'; location = '書閣'; }
+            else if (idx === 2) { effects = { virtue: 5 }; role = ['maid','chef','doctor','medic'][Math.floor(Math.random()*4)]; location = '庭院'; }
+            else if (idx === 3) { effects = { bond: 5, family: 5 }; role = 'medic'; location = '侯府臥房'; }
+            else if (idx === 4) { effects = { health: -5 }; role = ['maid','chef','doctor','medic'][Math.floor(Math.random()*4)]; location = '侯府'; }
+            applyEffects(effects);
+
+            if (!activePools[role] || activePools[role].length === 0) resetPools();
             currentStage = activePools[role].pop();
             currentStage.location = location;
             
-            // 修復：安全呼叫，避免 undefined function
-            if(mainCharacter && typeof mainCharacter.resetAppearance === 'function') {
-                mainCharacter.resetAppearance(); 
-            } else if(mainCharacter && typeof mainCharacter.reset === 'function') {
-                mainCharacter.reset();
-            } else {
-                console.warn("mainCharacter 缺少重置外觀方法。");
-            }
+            if(mainCharacter && typeof mainCharacter.resetAppearance === 'function') mainCharacter.resetAppearance();
+            else if(mainCharacter && typeof mainCharacter.reset === 'function') mainCharacter.reset();
             
             currentStoryLine = 0; currentState = STATES.STORY;
         }
