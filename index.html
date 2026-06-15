@@ -1001,10 +1001,12 @@
             currentStage.location = location;
             
             // 修復：安全呼叫，避免 undefined function
-            if(mainCharacter.resetAppearance) {
+            if(mainCharacter && typeof mainCharacter.resetAppearance === 'function') {
                 mainCharacter.resetAppearance(); 
-            } else if(mainCharacter.reset) {
+            } else if(mainCharacter && typeof mainCharacter.reset === 'function') {
                 mainCharacter.reset();
+            } else {
+                console.warn("mainCharacter 缺少重置外觀方法。");
             }
             
             currentStoryLine = 0; currentState = STATES.STORY;
