@@ -142,11 +142,10 @@
     window.addEventListener('resize', resize); resize();
 
     // =============== 變數宣告與狀態機 ===============
-    // 新增 STATES.FREE_MENU 用於處理自由模式的每日選項
     const STATES = { LOADING: 0, TITLE: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6, SYSTEM: 7, MODE_SELECT: 8, FREE_MENU: 9 };
     let currentState = STATES.LOADING; 
     
-    let gameMode = "tutorial"; // "tutorial" = 七日衛教體驗, "free" = 自由探索模式
+    let gameMode = "tutorial"; // "tutorial" = 七日衛教體驗, "free" = 繼續孕期照護
     let currentDay = 1; let currentStage = null; let currentStoryLine = 0;
     let selectedOptionFeedback = "";
     let mouse = { x: cw/2, y: ch/2, targetX: cw/2, targetY: ch/2, isDown: false };
@@ -154,9 +153,9 @@
     let clickZones = []; 
     let cameraShake = { x: 0, y: 0, amount: 0 };
     let globalAlpha = 1; 
-    let currentEnding = null; // 結局資料變數
-    let bloomIntensity = 0; // 光暈強度變數
-    let bloomColor = '212,175,55'; // 光暈顏色變數
+    let currentEnding = null; 
+    let bloomIntensity = 0; 
+    let bloomColor = '212,175,55'; 
 
     let player = { 
         knowledge: 50, health: 60, reputation: 50, bond: 50, 
@@ -169,7 +168,6 @@
         }
     };
 
-    // --- 1. 確保洗牌演算法 (Fisher-Yates Shuffle) 存在 ---
     function shuffle(array) {
         let currentIndex = array.length, randomIndex, temp;
         while (currentIndex !== 0) {
@@ -182,7 +180,6 @@
         return array;
     }
 
-    // --- 2. 確保粒子系統 (DustParticle) 初始化存在 ---
     class DustParticle {
         constructor() {
             this.x = Math.random() * cw; this.y = Math.random() * ch;
@@ -196,15 +193,13 @@
         }
         draw(ctx) {
             let alpha = (Math.sin(this.life * 2) + 1) * 0.3;
-            ctx.fillStyle = `rgba(212, 175, 55, ${alpha * 0.5})`; // 金色粒子
+            ctx.fillStyle = `rgba(212, 175, 55, ${alpha * 0.5})`; 
             ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
         }
     }
     let dustParticles = [];
     for (let i = 0; i < 40; i++) dustParticles.push(new DustParticle());
-    // =========================================================
 
-    // 全局資料 (成就、解鎖結局、多周目次數)
     let globalData = {
         playCount: 0,
         unlockedEndings: [],
@@ -225,7 +220,7 @@
                 globalData.unlockedEndings = parsed.unlockedEndings || [];
                 if(parsed.achievements) Object.assign(globalData.achievements, parsed.achievements);
             }
-        } catch(e) { console.log("讀取全局存檔失敗"); }
+        } catch(e) {}
     }
     function saveGlobalData() { localStorage.setItem('bianjing_global', JSON.stringify(globalData)); }
 
@@ -333,8 +328,7 @@
             "options": [
                 { "text": "微笑著握住春桃的手，聊些開心的家常。", "feedback": "【春桃 安心】您選擇敞開心扉，這份真誠的交流讓您的心情平靜了下來。", "expr": "happy", "effects": { "health": 10, "maid": 15, "virtue": 15 } },
                 { "text": "立刻振作精神，要求查看近期的侯府帳冊。", "feedback": "【春桃 敬佩】您選擇用責任來掩蓋脆弱。雷厲風行讓人敬佩，但也別忘了適時休息。", "expr": "shocked", "effects": { "reputation": 15, "power": 15, "health": -5 } },
-                { "text": "獨自走到搖籃旁，靜靜看著熟睡的孩子。", "feedback": "【內心 溫暖】孩子平靜的呼吸聲是最好的安撫，所有的不安都煙消雲散。", "expr": "normal", "effects": { "bond": 15, "family": 15 } },
-                { "text": "【隱藏】向春桃講解產後荷爾蒙變化的醫理，安撫她的擔憂。", "condition": (p) => p.knowledge >= 60, "feedback": "【春桃 崇拜】夫人博學！原來這都是身子在作祟，奴婢明白了！", "expr": "happy", "effects": { "knowledge": 15, "medical": 20, "maid": 20 } }
+                { "text": "獨自走到搖籃旁，靜靜看著熟睡的孩子。", "feedback": "【內心 溫暖】孩子平靜的呼吸聲是最好的安撫，所有的不安都煙消雲散。", "expr": "normal", "effects": { "bond": 15, "family": 15 } }
             ]
         },
         {
@@ -369,7 +363,126 @@
         }
     ];
 
-    let externalQuestions = [];
+    // =============== 新增 50 題專業產科衛教題庫 ===============
+    const obstetricEducationQuestions = [
+        { category:"孕期營養與飲食", question:"孕婦懷孕期間應如何維持良好營養？", options:["只增加甜食攝取","均衡攝取六大類食物","完全避免蛋白質","減少所有水分攝取"], answer:1, explanation:"孕期需要均衡營養以支持胎兒成長與母體健康。" },
+        { category:"孕期營養與飲食", question:"孕期若需補充葉酸，主要能預防胎兒的何種問題？", options:["神經管缺損","低體重","巨大兒","先天性心臟病"], answer:0, explanation:"葉酸對胎兒神經管發育至關重要，可預防神經管缺損。" },
+        { category:"孕期營養與飲食", question:"為了促進鐵質吸收，孕婦攝取含鐵食物時宜搭配何種維生素？", options:["維生素A","維生素B群","維生素C","維生素D"], answer:2, explanation:"維生素C能將三價鐵還原為二價鐵，大幅促進腸道對鐵質的吸收。" },
+        { category:"孕期營養與飲食", question:"孕期為預防便祕，飲食上應特別注意何種營養素的攝取？", options:["脂肪","膳食纖維與水分","精緻澱粉","高鹽食物"], answer:1, explanation:"充足的膳食纖維與水分能促進腸胃蠕動，預防孕期常見的便祕。" },
+        
+        { category:"產前檢查", question:"一般的例行性產檢中，初期多久需進行一次產檢？", options:["一週一次","兩週一次","四週一次","半年一次"], answer:2, explanation:"懷孕28週前，一般建議每四週進行一次例行性產前檢查。" },
+        { category:"產前檢查", question:"唐氏症篩檢通常建議在懷孕的哪一個階段進行？", options:["初期及中期","後期","臨產前","產後"], answer:0, explanation:"第一孕期及第二孕期皆有針對唐氏症的篩檢項目，以及早評估風險。" },
+        { category:"產前檢查", question:"超音波檢查在產檢中的主要目的為何？", options:["確認胎兒性別供挑選","評估胎兒大小、位置及構造","治療胎兒疾病","減少孕婦孕吐"], answer:1, explanation:"超音波主要用於評估胎兒生長發育狀況、羊水量及胎盤位置。" },
+        
+        { category:"孕期不適處理", question:"孕吐（害喜）最常發生在懷孕的哪一個時期？", options:["第一孕期(前三個月)","第二孕期","第三孕期","產褥期"], answer:0, explanation:"孕吐主要因人絨毛膜促性腺激素(hCG)升高，多發生在懷孕前三個月。" },
+        { category:"孕期不適處理", question:"為緩解孕吐，飲食上建議採取何種方式？", options:["暴飲暴食","少量多餐，避免油膩","多吃辛辣刺激食物","完全禁食"], answer:1, explanation:"少量多餐、清淡飲食，並避免空腹，能有效減輕孕吐的不適。" },
+        { category:"孕期不適處理", question:"孕後期常出現下肢水腫，下列何種做法有助於緩解？", options:["長時間站立","穿著緊身衣物","休息時抬高下肢","減少喝水到極致"], answer:2, explanation:"抬高下肢可促進靜脈回流，減輕下肢水腫狀況。" },
+        { category:"孕期不適處理", question:"孕婦若發生腿部抽筋，通常與缺乏何種礦物質有關？", options:["鐵","鈣","鋅","鈉"], answer:1, explanation:"孕期鈣質需求增加，若攝取不足或吸收不良易導致腿部抽筋。" },
+        
+        { category:"胎動觀察", question:"初產婦通常在懷孕約幾週時會開始感覺到胎動？", options:["8-10週","18-20週","28-30週","36週以後"], answer:1, explanation:"初產婦一般在18-20週左右能感受到如腸子蠕動般的初次胎動。" },
+        { category:"胎動觀察", question:"孕婦居家自我監測胎動，若發現胎動明顯減少，應如何處置？", options:["自行服藥","平躺觀察幾天再說","立即就醫檢查","用力拍打腹部喚醒"], answer:2, explanation:"胎動減少可能是胎兒窘迫的警訊，應盡速就醫由專業人員評估。" },
+        { category:"胎動觀察", question:"一般建議每日何時測量胎動最為適宜？", options:["睡著後","飯後或安靜休息時","劇烈運動中","洗澡時"], answer:1, explanation:"飯後血糖升高或安靜休息時，胎動通常較為明顯，適合進行測量。" },
+        
+        { category:"妊娠糖尿病衛教", question:"妊娠糖尿病篩檢通常在懷孕幾週時進行？", options:["12-16週","24-28週","32-36週","臨盆時"], answer:1, explanation:"常規的妊娠糖尿病篩檢多安排在懷孕24至28週之間進行。" },
+        { category:"妊娠糖尿病衛教", question:"患有妊娠糖尿病的孕婦，其胎兒最容易出現何種併發症？", options:["巨嬰症(大於4000克)","侏儒症","無腦兒","連體嬰"], answer:0, explanation:"母體高血糖會通過胎盤，刺激胎兒過度生長，導致巨嬰症。" },
+        { category:"妊娠糖尿病衛教", question:"妊娠糖尿病孕婦的飲食控制原則，下列何者正確？", options:["絕對禁食碳水化合物","多吃精緻甜點","定時定量，控制總醣量","只吃肉類不吃蔬菜"], answer:2, explanation:"應由營養師指導，定時定量並控制總醣類攝取，以平穩血糖。" },
+        { category:"妊娠糖尿病衛教", question:"妊娠糖尿病多數產婦在生產後的血糖狀況為何？", options:["會終身依賴胰島素","多數產後血糖會恢復正常","一定會立刻轉為第一型糖尿病","完全不需要再追蹤"], answer:1, explanation:"多數產後會恢復，但未來罹患第二型糖尿病風險較高，仍需定期追蹤。" },
+        
+        { category:"妊娠高血壓注意事項", question:"妊娠高血壓通常定義為懷孕幾週後，血壓高於140/90 mmHg？", options:["10週","20週","30週","38週"], answer:1, explanation:"妊娠高血壓是指懷孕20週後才出現的高血壓症狀。" },
+        { category:"妊娠高血壓注意事項", question:"若妊娠高血壓合併蛋白尿與全身性水腫，稱為何種疾病？", options:["子癇前症(妊娠毒血症)","妊娠糖尿病","前置胎盤","植入性胎盤"], answer:0, explanation:"合併蛋白尿等器官受損跡象即為子癇前症，需嚴密監控母胎安全。" },
+        { category:"妊娠高血壓注意事項", question:"子癇前症孕婦若出現何種症狀，應警覺病情惡化並立即就醫？", options:["輕微頻尿","視力模糊、嚴重頭痛或上腹痛","食慾增加","胎動頻繁"], answer:1, explanation:"嚴重頭痛、視力模糊或右上腹痛是子癇前症惡化(可能轉為子癇症)的危險徵兆。" },
+        
+        { category:"孕期運動", question:"對於無併發症的健康孕婦，孕期運動的建議為何？", options:["絕對臥床安胎","可進行中等強度的規律運動","鼓勵從事極限極限運動","只能進行深呼吸"], answer:1, explanation:"規律中等強度運動(如散步、孕婦瑜珈)有助於體力維持與順產。" },
+        { category:"孕期運動", question:"孕婦運動時若出現下列何種情況，應立即停止並就醫？", options:["輕微流汗","心跳稍微加快","陰道出血或規律宮縮","呼吸變深"], answer:2, explanation:"陰道出血、規律宮縮或羊水破裂都是危險徵兆，須立刻停止並就醫。" },
+        { category:"孕期運動", question:"懷孕中後期，應盡量避免何種姿勢的運動？", options:["側躺","站立","長時間平躺","坐姿"], answer:2, explanation:"長時間平躺可能壓迫下腔靜脈，導致仰臥性低血壓及胎兒血液灌流不足。" },
+        
+        { category:"孕期安全用藥", question:"孕期用藥安全分級中，哪一級代表對胎兒有明確的致畸胎風險，絕對禁用？", options:["A級","B級","C級","X級"], answer:3, explanation:"FDA分級中，X級藥物對胎兒危險性已證實大於益處，孕婦絕對禁用。" },
+        { category:"孕期安全用藥", question:"孕婦若不慎感冒發燒，最正確的處理方式為？", options:["自行購買成藥服用","使用偏方發汗","尋求醫師診治並告知懷孕","硬撐不吃任何藥"], answer:2, explanation:"孕期生病應由醫師評估，開立對胎兒安全的藥物，不宜自行服藥或硬撐。" },
+        { category:"孕期安全用藥", question:"懷孕期間使用中藥補品，應注意什麼？", options:["中藥很溫和，可隨意多吃","需經合格中醫師把脈，依體質開立","完全禁止觸碰任何中藥","只要是補氣的都可以吃"], answer:1, explanation:"中藥亦有藥性，部分活血化瘀藥物可能引起宮縮，需經專業中醫師評估。" },
+        
+        { category:"生產準備", question:"為準備生產，孕婦應提早準備的「待產包」中，不包含下列何者？", options:["產婦免洗內褲及產褥墊","新生兒出院衣物","高跟鞋與緊身牛仔褲","健保卡與孕婦健康手冊"], answer:2, explanation:"待產包應以產婦產後舒適及新生兒必需品為主，高跟鞋與緊身衣物不適合產後穿著。" },
+        { category:"生產準備", question:"拉梅茲呼吸法(Lamaze)的主要目的為何？", options:["讓胎兒提早出生","減輕產婦對分痛的恐懼與疼痛感知","代替麻醉藥物達到完全無痛","幫助產婦睡著"], answer:1, explanation:"拉梅茲呼吸法透過轉移注意力與肌肉放鬆，協助產婦減輕待產時的疼痛感。" },
+        { category:"生產準備", question:"會陰按摩通常建議在懷孕幾週後開始進行，以增加會陰彈性？", options:["懷孕初期","懷孕20週","懷孕34週以後","陣痛開始時"], answer:2, explanation:"懷孕後期(約34週後)進行會陰按摩，有助於增加組織彈性，降低生產撕裂傷機率。" },
+        
+        { category:"待產徵兆", question:"所謂的「落紅(Show)」，是指什麼現象？", options:["大量鮮血如月經湧出","混有微量子宮頸黏液的粉紅色或暗紅色分泌物","羊水破裂","強烈的腹部絞痛"], answer:1, explanation:"落紅是子宮頸變薄變軟時微血管破裂，混和黏液排出的微量血絲，是產兆之一。" },
+        { category:"待產徵兆", question:"真正的陣痛(True labor)與假性陣痛的最大區別為何？", options:["真陣痛只痛在背部","真陣痛頻率會越來越規律，且強度增強","假陣痛會導致子宮頸全開","休息或改變姿勢真陣痛就會消失"], answer:1, explanation:"真陣痛具有規律性、時間縮短、強度增加，且無法藉由休息或改變姿勢緩解。" },
+        { category:"待產徵兆", question:"若孕婦發現有清澈水狀液體從陰道不受控制地流出，這可能是什麼現象？", options:["尿失禁","落紅","破水(羊膜破裂)","白帶增加"], answer:2, explanation:"不受控的清澈液體流出極可能是破水，此時需盡速就醫以防感染及臍帶脫垂。" },
+        { category:"待產徵兆", question:"第一胎的產婦，通常建議何時前往醫院待產？", options:["一感覺到肚子緊緊的","落紅一點點時","規則陣痛約每3-5分鐘一次，持續1-2小時","羊水沒破都不用去"], answer:2, explanation:"初產婦產程較長，通常建議規則陣痛達到3-5分鐘一次時再前往醫院。" },
+        
+        { category:"自然產與剖腹產衛教", question:"自然產相較於剖腹產，對新生兒有一項顯著的好處是？", options:["新生兒頭型絕對完美","通過產道擠壓有助於排出肺部羊水","完全不會有黃疸","出生體重會比較重"], answer:1, explanation:"自然產過程中產道的擠壓，能幫助胎兒排出肺部羊水，降低呼吸窘迫風險。" },
+        { category:"自然產與剖腹產衛教", question:"下列何種情況通常會被列為剖腹產的醫療適應症？", options:["孕婦怕痛","胎位不正(如臀位、橫位)","胎兒體重2800克","預產期當天尚未陣痛"], answer:1, explanation:"胎位不正會增加自然產風險，通常建議採剖腹產以確保母胎安全。" },
+        { category:"自然產與剖腹產衛教", question:"無痛分娩(減痛分娩)通常採用哪一種麻醉方式？", options:["全身麻醉","硬脊膜外麻醉(Epidural)","局部浸潤麻醉","吸入性麻醉"], answer:1, explanation:"無痛分娩多採硬脊膜外麻醉，能有效阻斷痛覺傳導，但保留產婦用力的知覺。" },
+        
+        { category:"產後恢復", question:"產婦產後排出的「惡露」，其顏色正常的變化順序應為何？", options:["白色->紅色->黃色","紅色->漿液性(粉紅/棕色)->白色","透明->紅色->黑色","黃色->綠色->白色"], answer:1, explanation:"惡露會隨著子宮復原，從初期的紅色(血性)，轉為漿液性(粉褐)，最後變為白色。" },
+        { category:"產後恢復", question:"為促進產後子宮收縮與復原，最自然有效的方法是？", options:["一直平躺不動","大量飲用人參湯","親自哺餵母乳","每天進行高強度重訓"], answer:2, explanation:"寶寶吸吮乳頭會刺激母體分泌催產素，能有效促進子宮收縮與復原。" },
+        { category:"產後恢復", question:"自然產的會陰傷口，產後可採取何種方式促進血液循環與癒合？", options:["冰敷一個月","溫水坐浴(盆浴)","用力搓洗傷口","塗抹大量來路不明藥膏"], answer:1, explanation:"產後24小時後可開始溫水坐浴，促進局部血液循環，減輕疼痛並加速傷口癒合。" },
+        { category:"產後恢復", question:"凱格爾運動(骨盆底肌運動)對產婦的主要益處是？", options:["減少落紅","預防及改善產後尿失禁與骨盆腔鬆弛","增加母乳量","治療孕吐"], answer:1, explanation:"凱格爾運動能強化骨盆底肌肉，有效預防產後常見的應力性尿失禁。" },
+        
+        { category:"母乳哺餵", question:"初乳雖然量少，但對新生兒極為重要，其主因為何？", options:["含糖量最高","富含抗體(IgA)與免疫細胞","能讓嬰兒睡最久","味道最甜"], answer:1, explanation:"初乳被稱為嬰兒的第一劑疫苗，富含分泌型IgA抗體，能保護腸道免受感染。" },
+        { category:"母乳哺餵", question:"判斷嬰兒是否有喝到足夠母乳，最客觀的指標是？", options:["嬰兒哭泣的頻率","母乳擠出來的顏色","嬰兒每日的尿布量(排尿量)","母親乳房的大小"], answer:2, explanation:"觀察尿布量(如出生一週後每日約有6片重重的濕尿布)是評估奶量是否足夠的客觀指標。" },
+        { category:"母乳哺餵", question:"為預防乳腺炎，哺乳媽媽應注意？", options:["限制飲水","穿著極緊身的內衣","按需哺乳，避免乳汁過度淤積","減少哺乳次數"], answer:2, explanation:"頻繁且有效地排空乳房(按需哺乳)是預防乳腺阻塞與乳腺炎的關鍵。" },
+        { category:"母乳哺餵", question:"正確的含乳姿勢應包含下列何項特徵？", options:["寶寶只含住乳頭","寶寶嘴巴張大，含住乳頭及大部分乳暈","寶寶下巴遠離乳房","吸吮時會發出嘖嘖的彈舌聲"], answer:1, explanation:"正確含乳需讓寶寶嘴張大含住大部分乳暈，下巴貼緊乳房，才不會造成乳頭破皮。" },
+        
+        { category:"新生兒照護", question:"新生兒臍帶護理的重點為何？", options:["保持乾燥清潔","每天塗抹大量乳液保濕","用透氣膠帶緊緊包紮","發現微量血絲立刻用力擦拭"], answer:0, explanation:"臍帶應保持乾燥與清潔，多數在出生後一至兩週內會自然乾燥脫落。" },
+        { category:"新生兒照護", question:"預防嬰兒猝死症候群(SIDS)，應建議嬰兒採取何種睡姿？", options:["趴睡","側睡","仰睡","坐在推車上睡"], answer:2, explanation:"醫學界強烈建議一歲以下嬰兒應「仰睡」，可大幅降低嬰兒猝死症的風險。" },
+        { category:"新生兒照護", question:"生理性黃疸通常在新生兒出生後何時最為明顯？", options:["出生第一天","出生第3至5天","滿月時","三個月大"], answer:1, explanation:"生理性黃疸多在出生後第2-3天出現，第4-5天達高峰，約一至兩週後消退。" },
+        
+        { category:"產後心理健康", question:"產婦產後出現情緒低落、易哭泣(Postpartum blues)，通常會持續多久？", options:["終身","幾天到兩週內自然緩解","半年","一年以上"], answer:1, explanation:"產後情緒低落(Baby blues)極為常見，多數在產後兩週內會因荷爾蒙穩定與適應而自行緩解。" },
+        { category:"產後心理健康", question:"若產婦產後持續出現嚴重失眠、無價值感甚至有傷害自己或嬰兒的念頭，應懷疑為？", options:["產後情緒低落","產後憂鬱症(Postpartum depression)","產褥熱","妊娠糖尿病"], answer:1, explanation:"嚴重且持續的情緒障礙及負面念頭是產後憂鬱症的特徵，需尋求專業醫療與心理支持。" }
+    ];
+
+    // 動態將衛教題庫轉換為 RPG 選項格式
+    function generateEduQuestion(raw) {
+        const roles = [
+            { c: "丫鬟 春桃", pool: "maid" },
+            { c: "膳房 總管", pool: "chef" },
+            { c: "太醫 張大人", pool: "doctor" },
+            { c: "醫女 蘇氏", pool: "medic" }
+        ];
+        let roleObj = roles[Math.floor(Math.random() * roles.length)];
+        
+        let mappedOptions = raw.options.map((optText, idx) => {
+            let isCorrect = (idx === raw.answer);
+            return {
+                text: optText,
+                feedback: (isCorrect ? "【理解正確】 " : "【觀念釐清】 ") + raw.explanation,
+                expr: isCorrect ? "happy" : "shocked",
+                effects: isCorrect ? { knowledge: 10, medical: 5 } : { knowledge: 5 } // 即使選錯也給予微量知識鼓勵學習
+            };
+        });
+
+        // 確保選項每次出現時順序會被打亂
+        mappedOptions = shuffle(mappedOptions);
+
+        return {
+            category: raw.category,
+            character: roleObj.c,
+            location: ['侯府臥房','庭院','書閣','太醫院'][Math.floor(Math.random()*4)],
+            story: ["「夫人，關於" + raw.category + "，近來大家有些討論，想請教您的看法。」", "（孕產衛教挑戰）"],
+            question: raw.question,
+            options: mappedOptions
+        };
+    }
+
+    function refillFreeModePools() {
+        let generatedQuestions = obstetricEducationQuestions.map(q => generateEduQuestion(q));
+        generatedQuestions = shuffle(generatedQuestions);
+        
+        let p_maid = generatedQuestions.filter(q => q.character.includes('丫鬟'));
+        let p_chef = generatedQuestions.filter(q => q.character.includes('膳房'));
+        let p_doc = generatedQuestions.filter(q => q.character.includes('太醫'));
+        let p_med = generatedQuestions.filter(q => q.character.includes('醫女'));
+
+        // 防呆補充
+        if(p_maid.length===0) p_maid = [generateEduQuestion(obstetricEducationQuestions[0])];
+        if(p_chef.length===0) p_chef = [generateEduQuestion(obstetricEducationQuestions[1])];
+        if(p_doc.length===0) p_doc = [generateEduQuestion(obstetricEducationQuestions[2])];
+        if(p_med.length===0) p_med = [generateEduQuestion(obstetricEducationQuestions[3])];
+
+        activePools = { maid: p_maid, chef: p_chef, doctor: p_doc, medic: p_med };
+        console.log("自由模式衛教題庫已自動擴充與分配。");
+    }
+
     let activePools = {};
 
     function resetPools() {
@@ -488,10 +601,8 @@
             this.scale += (1 - this.scale) * dt * 8; this.y += (0 - this.y) * dt * 8;
         }
 
-        // --- 3. 新增 resetAppearance 方法，並保留 reset 做為雙重保險 ---
         reset() { this.scale = 0.5; this.y = 50; }
         resetAppearance() { this.reset(); this.setEmotion('normal'); }
-        // =============================================================
 
         draw(ctx, cx, cy, scale, isMini = false) {
             ctx.save(); ctx.translate(cx, cy + (isMini ? 0 : this.y)); ctx.scale(scale * (isMini ? 1 : this.scale), scale * (isMini ? 1 : this.scale));
@@ -899,7 +1010,6 @@
 
         ctx.save(); ctx.scale(dpr, dpr); ctx.translate(cameraShake.x, cameraShake.y);
 
-        // --- 4. 將 FREE_MENU 狀態也納入淡入淡出過渡效果 ---
         if ([STATES.DAY_TRANSITION, STATES.TITLE, STATES.END, STATES.LOADING, STATES.MODE_SELECT, STATES.FREE_MENU].includes(currentState)) globalAlpha += (1 - globalAlpha) * dt * 2;
         else globalAlpha = 1;
         if (isNaN(globalAlpha)) globalAlpha = 1; ctx.globalAlpha = globalAlpha;
@@ -938,15 +1048,15 @@
         else if (currentState === STATES.TITLE) {
             ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,cw,ch); ctx.textAlign = 'center'; ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 20;
             ctx.fillStyle = '#f0ebd8'; let ts = Math.max(40, Math.min(80, cw * 0.08)); ctx.font = `bold ${ts}px ${FONT_FAMILY}`; ctx.fillText("汴京娘子調養記", cw/2, ch/2 - 120); ctx.shadowBlur = 0;
-            ctx.fillStyle = '#d4af37'; ctx.font = `${ts*0.35}px ${FONT_FAMILY}`; ctx.fillText("— 沉浸式古風人生養成 —", cw/2, ch/2 - 50);
+            ctx.fillStyle = '#d4af37'; ctx.font = `${ts*0.35}px ${FONT_FAMILY}`; ctx.fillText("— 產後照護RPG —", cw/2, ch/2 - 50);
             if(globalData.playCount > 0) { ctx.fillStyle = '#82c0d9'; ctx.font = `18px ${FONT_FAMILY}`; ctx.fillText(`【多周目繼承】初始智慧+10, 聲望+10`, cw/2, ch/2); }
             drawButton(ctx, 'btn_start', {x: cw/2 - 120, y: ch/2 + 80, w: 240, h: 60}, globalData.playCount > 0 ? "重啟人生" : "踏入侯府");
         }
         else if (currentState === STATES.DAY_TRANSITION) {
             ctx.fillStyle = 'rgba(10,10,12,0.8)'; ctx.fillRect(0,0,cw,ch);
             let dayInfo = daysData[Math.min(currentDay - 1, daysData.length - 1)];
-            let titleText = gameMode === "free" ? `自由探索 第 ${currentDay} 天` : dayInfo.day;
-            let eventText = gameMode === "free" ? "侯府的日常依舊。今日您打算繼續在府內巡視，與眾人交流並處理大小事務。" : dayInfo.event;
+            let titleText = gameMode === "free" ? `孕期照護 第 ${currentDay} 天` : dayInfo.day;
+            let eventText = gameMode === "free" ? "侯府的日常依舊。今日您將繼續面對各種產科與孕期照護的挑戰，守護母胎安康。" : dayInfo.event;
             
             ctx.textAlign = 'center'; ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 15;
             ctx.fillStyle = '#d4af37'; ctx.font = `bold 52px ${FONT_FAMILY}`; ctx.fillText(titleText, cw/2, ch/2 - 80); ctx.shadowBlur = 0;
@@ -959,11 +1069,10 @@
             drawDatePanel(ctx); drawStatsPanel(ctx);
             let options = [
                 { text: "【結束體驗】進行最終結算，觀看您的主母結局。" },
-                { text: "【繼續探索】進入自由模式，無天數限制繼續遊玩。" }
+                { text: "【繼續孕期照護】進入無盡衛教模式，持續面對產科挑戰。" }
             ];
-            renderDialog(ctx, "七日衛教體驗完成", "您已成功度過了最艱難的產後初期。接下來，您打算...", options);
+            renderDialog(ctx, "七日衛教體驗完成", "您已成功度過了最艱難的產前/產後初期。接下來，您打算...", options);
         }
-        // --- 5. 新增 FREE_MENU 渲染區塊，提供五種操作選擇 ---
         else if (currentState === STATES.FREE_MENU) {
             drawDatePanel(ctx); drawStatsPanel(ctx);
             let options = [
@@ -972,9 +1081,9 @@
                 { text: "【培養NPC關係】巡視後宅，施恩下人" },
                 { text: "【照顧孩子成長】親自哺育，增進羈絆" },
                 { text: "【處理府內事件】隨機應變，處變不驚" },
-                { text: "【結束自由探索】觀看最終人生結局" }
+                { text: "【結束照護體驗】觀看最終人生結局" }
             ];
-            renderDialog(ctx, "侯府日常", "產後七日已過，您正式開始掌握侯府生活。今日您打算：", options);
+            renderDialog(ctx, "侯府日常 (照護模式)", "您將持續面對隨機產科衛教挑戰。今日您打算：", options);
         }
         else if (currentState === STATES.STORY) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, currentStage.character, currentStage.story[currentStoryLine], null); }
         else if (currentState === STATES.QUESTION) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, currentStage.character || "內心抉擇", currentStage.question, currentStage.options); }
@@ -1003,34 +1112,30 @@
         }
         else if (currentState === STATES.DAY_TRANSITION && clicked && clicked.id === 'screen_next_day') {
             if (gameMode === "free") {
-                // 自由模式不直接進入劇情，而是進入菜單選擇
                 globalAlpha = 0; currentState = STATES.FREE_MENU;
             } else {
                 let role = daysData[currentDay - 1].role;
                 let location = daysData[currentDay - 1].location;
-                if (!activePools[role] || activePools[role].length === 0) resetPools(); // 題庫抽空時補充
+                if (!activePools[role] || activePools[role].length === 0) resetPools(); 
                 currentStage = activePools[role].pop();
                 currentStage.location = location;
                 
-                // 修復：安全呼叫 resetAppearance()
                 if(mainCharacter && typeof mainCharacter.resetAppearance === 'function') {
                     mainCharacter.resetAppearance(); 
                 } else if(mainCharacter && typeof mainCharacter.reset === 'function') {
                     mainCharacter.reset();
-                } else { console.warn("mainCharacter 缺少重置外觀方法。"); }
+                }
                 
                 currentStoryLine = 0; currentState = STATES.STORY;
             }
         }
-        // --- 6. 新增對 STATES.FREE_MENU 選項的點擊處理邏輯 ---
         else if (currentState === STATES.FREE_MENU && clicked && clicked.id.startsWith('opt_')) {
             let idx = parseInt(clicked.id.split('_')[1]);
-            if (idx === 5) { // 結束自由探索
+            if (idx === 5) { 
                 currentEnding = determineEnding(); globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy');
                 return;
             }
 
-            // 依據玩家選擇套用基本屬性增益並決定出現的 NPC 池
             let effects = {}; let role = 'maid'; let location = '侯府';
             if (idx === 0) { effects = { reputation: 5, power: 5 }; role = 'chef'; location = '侯府正廳'; }
             else if (idx === 1) { effects = { knowledge: 5, medical: 5 }; role = 'doctor'; location = '書閣'; }
@@ -1039,7 +1144,7 @@
             else if (idx === 4) { effects = { health: -5 }; role = ['maid','chef','doctor','medic'][Math.floor(Math.random()*4)]; location = '侯府'; }
             applyEffects(effects);
 
-            if (!activePools[role] || activePools[role].length === 0) resetPools();
+            if (!activePools[role] || activePools[role].length === 0) refillFreeModePools();
             currentStage = activePools[role].pop();
             currentStage.location = location;
             
@@ -1067,10 +1172,8 @@
         else if (currentState === STATES.MODE_SELECT && clicked && clicked.id.startsWith('opt_')) {
             let idx = parseInt(clicked.id.split('_')[1]);
             if (idx === 0) {
-                // 結束體驗
                 currentEnding = determineEnding(); globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy');
             } else {
-                // 繼續探索
                 gameMode = "free"; globalAlpha = 0; currentState = STATES.DAY_TRANSITION;
             }
         }
