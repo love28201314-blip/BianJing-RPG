@@ -999,7 +999,14 @@
             
             currentStage = activePools[role].pop();
             currentStage.location = location;
-            if(mainCharacter.resetAppearance) mainCharacter.resetAppearance(); else if(mainCharacter.reset) mainCharacter.reset();
+            
+            // 修復：安全呼叫，避免 undefined function
+            if(mainCharacter.resetAppearance) {
+                mainCharacter.resetAppearance(); 
+            } else if(mainCharacter.reset) {
+                mainCharacter.reset();
+            }
+            
             currentStoryLine = 0; currentState = STATES.STORY;
         }
         else if (currentState === STATES.STORY && clicked && clicked.id === 'screen_next') {
