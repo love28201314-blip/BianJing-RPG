@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>汴京娘子調養記 - 劇情沉浸版</title>
+    <title>汴京娘子調養記 - AAA Cinematic Edition</title>
     <style>
         body {
             margin: 0;
@@ -11,7 +11,7 @@
             background-color: #05070a;
             font-family: 'Kaiti', '標楷體', 'Times New Roman', serif;
             overflow: hidden; 
-            color: #fff;
+            color: #ececec;
             user-select: none; 
             -webkit-user-select: none;
         }
@@ -21,6 +21,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
+            background: #000;
         }
         canvas {
             display: block;
@@ -28,6 +29,7 @@
             height: 100%;
             cursor: crosshair;
             touch-action: none;
+            transition: opacity 0.5s ease;
         }
     </style>
 </head>
@@ -38,15 +40,8 @@
 </div>
 
 <script>
-    // --- 1. Canvas 初始化 ---
     const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas ? canvas.getContext('2d') : null; 
-
-    if (canvas && ctx) {
-        console.log("Canvas初始化成功", canvas.width, canvas.height);
-    } else {
-        console.error("Canvas初始化失敗！找不到元件或無法建立 Context。");
-    }
+    const ctx = canvas.getContext('2d'); 
 
     if (!CanvasRenderingContext2D.prototype.roundRect) {
         CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
@@ -69,21 +64,23 @@
     function resize() {
         cw = window.innerWidth;
         ch = window.innerHeight;
-        if(canvas) {
-            canvas.width = cw * dpr;
-            canvas.height = ch * dpr;
-        }
+        canvas.width = cw * dpr;
+        canvas.height = ch * dpr;
     }
     window.addEventListener('resize', resize);
     resize();
 
-    // --- 2. 遊戲狀態機 (簡化為線性劇情流) ---
-    const STATES = { LOADING: 0, START: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6 };
+    // 狀態機
+    const STATES = { START: 0, DAY_TRANSITION: 1, FREE_ACTION: 2, ACTION_RESULT: 3, RANDOM_EVENT: 4, HIDDEN_EVENT: 5, INTERACT_CHOICE: 6, STORY: 7, QUESTION: 8, FEEDBACK: 9, END: 10, LOADING: 11 };
     let currentState = STATES.LOADING; 
     let currentDay = 1;
     let currentStage = null;
     let currentStoryLine = 0;
     let selectedOptionFeedback = "";
+    
+    // CG 演出控制變數
+    let isCinematic = false;
+    let cinematicLerp = 0;
 
     let mouse = { x: cw/2, y: ch/2, targetX: cw/2, targetY: ch/2, isDown: false };
     let time = 0, dt = 0, lastTime = 0;
@@ -94,120 +91,48 @@
     let bloomColor = '255,255,255';
     let globalAlpha = 1; 
     
-    // 玩家屬性系統 (保留數值供內部計算，但不直接以成績單顯示)
     let player = { 
-        knowledge: 50,    
-        health: 60,       
-        reputation: 50,   
-        bond: 50,         
+        knowledge: 50, health: 60, reputation: 50, bond: 50, 
         routes: { virtue: 0, power: 0, medical: 0, family: 0 }, 
         affections: {
-            maid: { name: "丫鬟 春桃", current: 20, target: 20, max: 100, color: "#e86f88", status: "陌生" },
-            chef: { name: "膳房 總管", current: 20, target: 20, max: 100, color: "#d29c72", status: "陌生" },
-            doctor: { name: "太醫 張大人", current: 20, target: 20, max: 100, color: "#6ca07e", status: "陌生" },
-            medic: { name: "醫女 蘇氏", current: 20, target: 20, max: 100, color: "#82c0d9", status: "陌生" }
+            maid: { name: "丫鬟 春桃", current: 20, target: 20, max: 100, color: "#e88f99", status: "陌生" },
+            chef: { name: "膳房 總管", current: 20, target: 20, max: 100, color: "#b89074", status: "陌生" },
+            doctor: { name: "太醫 張大人", current: 20, target: 20, max: 100, color: "#6a8a7a", status: "陌生" },
+            medic: { name: "醫女 蘇氏", current: 20, target: 20, max: 100, color: "#7a9ba8", status: "陌生" }
         }
     };
 
     let currentEnding = null;
 
-    // --- 3. 每日情境設定 ---
     const daysData = [
-        { day: "產後第一天", weather: "sunny", location: "侯府臥房", role: "maid", event: "初為人母，您抱著剛出生的孩兒，心中充滿溫暖。但初期的照護與身心調適立刻成為了首要任務。" },
-        { day: "產後第二天", weather: "cloudy", location: "廚房", role: "chef", event: "產後體虛，膳房送來了各式大補之物。如何在滋補與身體承受度之間取得平衡，考驗著您的智慧。" },
-        { day: "產後第三天", weather: "rainy", location: "太醫院", role: "doctor", event: "今日太醫來請平安脈。面對身體的種種變化，需要專業的醫理來調適。" },
-        { day: "產後第四天", weather: "snowy", location: "庭院", role: "medic", event: "氣溫驟降。小少爺似乎有些焦躁不安，醫女前來與您一同探討育兒之法。" },
-        { day: "產後第五天", weather: "sunny", location: "侯府臥房", role: "maid", event: "寶寶的成長速度驚人，生活規律開始改變，後宅的下人們也在觀察您的應對方式。" },
-        { day: "產後第六天", weather: "cloudy", location: "夜晚侯府", role: "doctor", event: "夜半時分，疲憊感襲來。這是對母親體力與意志力的最大考驗，也是沉澱心靈的時刻。" },
-        { day: "產後第七天", weather: "sunny", location: "庭院", role: "medic", event: "轉眼已至第七日，您逐漸適應了母親與主母的雙重身份。今日的總結，將決定未來的道路。" }
+        { day: "產後第一天", weather: "sunny", location: "侯府臥房", role: "maid", event: "初為人母，您抱著剛出生的孩兒，心中充滿溫暖。但初乳的分泌與照護立刻成為了首要挑戰。" },
+        { day: "產後第二天", weather: "cloudy", location: "膳房", role: "chef", event: "產後體虛，膳房送來了各式大補之物。如何在發奶與恢復中取得平衡，考驗著您的智慧。" },
+        { day: "產後第三天", weather: "rainy", location: "太醫院", role: "doctor", event: "今日太醫來請平安脈。哺乳時的疼痛與身心變化，需要專業的醫理來調適。" },
+        { day: "產後第四天", weather: "snowy", location: "庭院", role: "medic", event: "氣溫驟降。小少爺似乎有些焦躁不安，醫女前來協助您解讀寶寶的各種信號。" },
+        { day: "產後第五天", weather: "sunny", location: "侯府臥房", role: "maid", event: "寶寶的成長速度驚人，尿布與睡眠的規律開始改變，後宅的下人們也在觀察您的應對。" },
+        { day: "產後第六天", weather: "cloudy", location: "夜晚侯府", role: "doctor", event: "夜半時分，寶寶頻繁討奶，疲憊感襲來。這是對母親體力與意志力的最大考驗。" },
+        { day: "產後第七天", weather: "sunny", location: "庭院", role: "medic", event: "轉眼已至第七日，您逐漸適應了母親的身份。今日的總結，將決定您在侯府的最終地位。" }
     ];
 
     function shuffle(array) {
         let currentIndex = array.length, randomIndex, temp;
         while (currentIndex !== 0) {
-            randomIndex = Math.floor(Math.random() * currentIndex);
-            currentIndex--;
-            temp = array[currentIndex];
-            array[currentIndex] = array[randomIndex];
-            array[randomIndex] = temp;
+            randomIndex = Math.floor(Math.random() * currentIndex); currentIndex--;
+            temp = array[currentIndex]; array[currentIndex] = array[randomIndex]; array[randomIndex] = temp;
         }
         return array;
     }
-
-    // --- 4. 內建備用題庫 (以價值觀取代對錯) ---
-    const fallbackQuestions = [
-         {
-            "category": "產婦心理調適", "character": "丫鬟 春桃",
-            "story": ["「夫人，您今日看著窗外的落葉，似乎有些悶悶不樂。是不是奴婢們伺候得不夠周到？」", "【調養小記】：產後由於身心巨變，容易產生低落的情緒。接納自己的情緒，並尋求信任者的陪伴是非常重要的。"],
-            "question": "面對突如其來的低落情緒與丫鬟的關心，您會怎麼做？",
-            "options": [
-                { "text": "微笑著握住春桃的手，聊些開心的家常，轉移注意力。", "feedback": "【春桃 安心】您選擇敞開心扉，這份真誠的交流讓您的心情平靜了下來。", "expr": "happy", "effects": { "health": 10, "maid": 15, "virtue": 15 } },
-                { "text": "立刻振作精神，要求查看近期的侯府帳冊。", "feedback": "【春桃 敬佩】您選擇用責任來掩蓋脆弱。這種雷厲風行的作風讓人敬佩，但也別忘了適時休息。", "expr": "shocked", "effects": { "reputation": 15, "power": 15, "health": -5 } },
-                { "text": "獨自走到搖籃旁，靜靜看著熟睡的孩子，從中汲取力量。", "feedback": "【內心 溫暖】孩子平靜的呼吸聲是最好的安撫，所有的不安都煙消雲散。", "expr": "normal", "effects": { "bond": 15, "family": 15 } }
-            ]
-        },
-        {
-            "category": "飲食調理與家庭溝通", "character": "膳房 總管",
-            "story": ["「夫人！這十全大補濃湯是老夫人特意吩咐熬製的，最是滋補，您趁熱多喝些！」", "【調養小記】：產後初期腸胃較弱，宜循序漸進地進補，過於濃膩的湯水有時反而難以消化。"],
-            "question": "面對長輩的盛情與這碗濃郁的補湯，夫人該如何抉擇？",
-            "options": [
-                { "text": "溫和地請總管日後多準備清淡高湯，細水長流地調理。", "feedback": "【總管 點頭】您深諳養生之道，清淡的湯水確實讓您的身體感到更加輕盈舒暢。", "expr": "happy", "effects": { "knowledge": 15, "chef": 15, "medical": 15, "health": 10 } },
-                { "text": "為了不辜負長輩心意，您選擇細細品嚐完這碗濃湯。", "feedback": "【總管 欣慰】這份濃湯雖讓身體感到些許負擔，但您顧全大局的體貼，讓長輩感到溫暖。", "expr": "normal", "effects": { "health": -5, "family": 15, "virtue": 10 } },
-                { "text": "賞賜總管，並將此湯轉賜給府中其他辛勞的僕婦。", "feedback": "【總管 感恩】您懂得將資源做最好的分配，這份大度讓後宅眾人對您更加死心塌地。", "expr": "happy", "effects": { "reputation": 20, "power": 15, "chef": 10 } }
-            ]
-        },
-        {
-            "category": "產後身體調養", "character": "太醫 張大人",
-            "story": ["「夫人，產後百脈空虛，若有腰酸背痛或是惡露未淨，皆是常理，切莫過於心急。」", "【調養小記】：產後身體的恢復需要時間，保持充足睡眠與愉快的心情，比任何靈丹妙藥都重要。"],
-            "question": "面對身體的疲憊感，您打算如何調整步調？",
-            "options": [
-                { "text": "虛心向太醫請教穴位按摩之法，主動了解自己的身體。", "feedback": "【太醫 撫鬚】夫人好學不倦！您對醫理的認知加深，未來更能從容應對各種狀況。", "expr": "happy", "effects": { "knowledge": 20, "doctor": 20, "medical": 20 } },
-                { "text": "放下身段，將雜事交由下人打理，專心閉目休養。", "feedback": "【太醫 點頭】夫人懂得適時放手。這份從容讓您的身心得到了極大的放鬆，體力逐漸恢復。", "expr": "happy", "effects": { "health": 20, "virtue": 10 } },
-                { "text": "即使疲憊，依然堅持親自翻閱帳冊，維持侯府運作。", "feedback": "【太醫 嘆息】夫人的堅強令人動容。雖然透支了體力，但您在府中的威望達到了頂峰。", "expr": "shocked", "effects": { "health": -10, "reputation": 25, "power": 20 } }
-            ]
-        },
-        {
-            "category": "嬰幼兒照護", "character": "醫女 蘇氏",
-            "story": ["「夫人，小少爺這會兒一直哭鬧，是不是奴婢哪裡沒伺候好？還是少爺餓了？」", "【調養小記】：嬰兒啼哭是表達需求的方式，除了飢餓，也可能是尿布濕了、太熱或需要安撫。"],
-            "question": "面對焦慮的醫女與哭鬧的孩兒，您會如何處理？",
-            "options": [
-                { "text": "溫和地教導她檢查尿布與衣物，耐心排查原因。", "feedback": "【蘇醫女 敬佩】您耐心的教導不僅安撫了孩兒，也讓下人學到了經驗，主僕間信任更深了。", "expr": "happy", "effects": { "knowledge": 15, "medic": 20, "virtue": 15 } },
-                { "text": "親自將孩子抱入懷中，用母親的溫暖來安撫他。", "feedback": "【內心 滿足】您選擇親力親為，看著孩子在懷中安穩睡去，這份親情羈絆無比珍貴。", "expr": "happy", "effects": { "health": -5, "bond": 20, "family": 15 } },
-                { "text": "讓下人們按規矩行事，自己從旁冷靜觀察指揮。", "feedback": "【蘇醫女 敬畏】您冷靜的指揮展現了主母的氣度，下人們井然有序地完成了照護。", "expr": "normal", "effects": { "reputation": 10, "power": 15, "medic": 5 } }
-            ]
-        }
-    ];
 
     let externalQuestions = [];
     let activePools = {};
 
     function resetPools() {
-        let pool = externalQuestions.length > 0 ? externalQuestions : fallbackQuestions;
-        
-        let maidPool = pool.filter(q => q.character && (q.character.includes('丫鬟') || q.character.includes('春桃')));
-        let chefPool = pool.filter(q => q.character && (q.character.includes('膳房') || q.character.includes('總管')));
-        let doctorPool = pool.filter(q => q.character && (q.character.includes('太醫') || q.character.includes('張大人')));
-        let medicPool = pool.filter(q => q.character && (q.character.includes('醫女') || q.character.includes('蘇氏')));
-
-        if(maidPool.length === 0 && chefPool.length === 0 && doctorPool.length === 0 && medicPool.length === 0) {
-            let shuffled = shuffle(pool.slice());
-            let chunk = Math.max(1, Math.floor(shuffled.length / 4));
-            maidPool = shuffled.slice(0, chunk);
-            chefPool = shuffled.slice(chunk, chunk*2);
-            doctorPool = shuffled.slice(chunk*2, chunk*3);
-            medicPool = shuffled.slice(chunk*3);
-        }
-
-        if(maidPool.length === 0) maidPool = [fallbackQuestions.find(q=>q.character && q.character.includes('丫鬟')) || fallbackQuestions[0]];
-        if(chefPool.length === 0) chefPool = [fallbackQuestions.find(q=>q.character && q.character.includes('膳房')) || fallbackQuestions[1]];
-        if(doctorPool.length === 0) doctorPool = [fallbackQuestions.find(q=>q.character && q.character.includes('太醫')) || fallbackQuestions[2]];
-        if(medicPool.length === 0) medicPool = [fallbackQuestions.find(q=>q.character && q.character.includes('醫女')) || fallbackQuestions[3]];
-
+        let pool = externalQuestions.length > 0 ? externalQuestions : [];
         activePools = { 
-            maid: shuffle(maidPool.slice()), 
-            chef: shuffle(chefPool.slice()), 
-            doctor: shuffle(doctorPool.slice()), 
-            medic: shuffle(medicPool.slice()) 
+            maid: shuffle(pool.filter(q => q.character && (q.character.includes('丫鬟') || q.character.includes('春桃'))).slice()), 
+            chef: shuffle(pool.filter(q => q.character && (q.character.includes('膳房') || q.character.includes('總管'))).slice()), 
+            doctor: shuffle(pool.filter(q => q.character && (q.character.includes('太醫') || q.character.includes('張大人'))).slice()), 
+            medic: shuffle(pool.filter(q => q.character && (q.character.includes('醫女') || q.character.includes('蘇氏'))).slice()) 
         };
     }
 
@@ -216,918 +141,756 @@
             let res = await fetch('questions.json');
             if (!res.ok) throw new Error("HTTP status " + res.status);
             let data = await res.json();
-            if (data && data.length > 0) {
-                externalQuestions = data;
-                console.log("外部題庫載入成功！共載入 " + data.length + " 題。");
-            }
+            if (data && data.length > 0) externalQuestions = data;
         } catch (error) {
-            console.warn("無法載入外部題庫，自動切換至內建備用題庫。", error);
-            externalQuestions = fallbackQuestions.slice();
+            console.warn("無法載入外部題庫。請確保 questions.json 存在。");
         } finally {
             resetPools(); 
             currentState = STATES.START; 
         }
     }
 
-    // --- 5. 序章：人生態度的選擇 ---
     const introStage = {   
-        character: "內心獨白",
-        location: "侯府臥房",
+        character: "內心獨白", location: "侯府臥房",
         story: [
-            "【序章：新生與責任】",
-            "我乃大宋名門之女，嫁入這豪門侯府。昨日歷經辛苦，終於平安誕下了小少爺。",
-            "看著這雕樑畫棟的侯府臥房，我知道，嶄新的人生篇章才剛剛展開。",
-            "產後這七日，不僅是調養身心的黃金期，更是重新熟悉後宅、建立主母威信的關鍵時刻。",
-            "府內上下都在看著我。我必須做出抉擇，確立我未來的行事作風。"
+            "【序章：侯府主母的挑戰】",
+            "我乃大宋名門之女，嫁入這豪門侯府。昨日歷經生死，終於平安誕下了嫡出小少爺。",
+            "看著這雕樑畫棟的侯府臥房，我知道，真正的挑戰才剛開始。",
+            "產後這七日，不只是調養虛弱的鳳體，更是重新整頓後宅、建立主母威信的關鍵時刻。",
+            "府內上下，無數雙眼睛正盯著我。我必須做出抉擇，確立我未來的道路。"
         ],
-        question: "【主母方針】您決定以何種作風開啟這七日的調養與管家之路？",
+        question: "【立威抉擇】您決定以何種作風開啟這七日的調養與管家之路？",
         options: [
-            { text: "【賢德】以和為貴，溫和體恤下人，廣結善緣。", feedback: "您決定以德服人，溫和的氣質讓下人們感到無比安心，府內氣氛融洽。", expr: 'happy', effects: { virtue: 20, health: 10, maid: 10 } },
-            { text: "【權謀】恩威並施，賞罰分明，樹立不容侵犯的威嚴。", feedback: "您眼神堅定，決定立下規矩。雖需勞心勞力，但也確保了後宅的井然有序。", expr: 'normal', effects: { power: 20, reputation: 10 } },
-            { text: "【醫術】研讀醫理，相信科學調養，用知識守護母子。", feedback: "您深知身體才是本錢，決定以科學醫理武裝自己，這份好學令人敬佩。", expr: 'happy', effects: { medical: 20, knowledge: 10, doctor: 10 } },
-            { text: "【親情】萬事以孩兒為重，親力親為，享受育兒之樂。", feedback: "看著繈褓中的骨肉，您滿眼溫柔。對您而言，孩子的笑容勝過一切權勢。", expr: 'happy', effects: { family: 20, bond: 10, medic: 5 } }
+            { text: "【賢德】以和為貴，溫和對待下人博取美名。", feedback: "您決定以德服人，溫和的氣質讓下人們感到安心。", expr: 'happy', effects: { virtue: 20, health: 10, maid: 10 } },
+            { text: "【權謀】恩威並施，藉機敲打下人樹立威嚴。", feedback: "您眼神凌厲，決定趁機立威，絕不容許後宅有絲毫怠慢。", expr: 'normal', effects: { power: 20, reputation: 10, chef: -5 } },
+            { text: "【醫術】研讀醫理，科學調養守護母子平安。", feedback: "您深知身體才是本錢，決定以科學醫理武裝自己。", expr: 'happy', effects: { medical: 20, knowledge: 10, doctor: 10 } },
+            { text: "【親情】萬事以孩兒為重，親力親為。", feedback: "看著繈褓中的骨肉，您滿眼溫柔，決定將所有心血傾注於他。", expr: 'happy', effects: { family: 20, bond: 10, medic: 5 } }
         ]
     };
 
-    // --- 6. 純劇情式結局 ---
     function determineEnding() {
         let r = player.routes;
         let highestRoute = Object.keys(r).reduce((a, b) => r[a] > r[b] ? a : b);
 
-        if (player.health < 30) {
-            return { 
-                title: "【積勞成疾】", 
-                desc: "您將所有精力都傾注在侯府與孩子身上，雖然保全了體面，卻忽略了自己。太醫強烈建議您必須長年臥床休養。這是一條充滿犧牲的道路，也是您身為主母的覺悟。", 
-                color: "#e74c3c" 
-            };
-        }
-        
-        if (highestRoute === 'power') {
-            return { 
-                title: "【權傾侯府】", 
-                desc: "經過這七日的歷練，您展現出卓越的管家手腕與非凡的氣度。恩威並施之下，侯府上下對您心服口服。您成為了這深宅大院中，無人能撼動的當家主母，引領侯府走向繁榮。", 
-                color: "#8e44ad" 
-            };
-        } else if (highestRoute === 'medical') {
-            return { 
-                title: "【妙手神醫】", 
-                desc: "您悉心研讀醫理，將科學的調養之道與傳統智慧完美融合。您的細心與好學，不僅讓母子安康，這份珍貴的照護經驗更傳承給了府中的下人，在京城醫界留下了佳話。", 
-                color: "#27ae60" 
-            };
-        } else if (highestRoute === 'family') {
-            return { 
-                title: "【母慈子孝】", 
-                desc: "您將滿腔的溫柔與心血都傾注在孩兒身上。母子連心的羈絆，成為您在這深宅中最堅實的依靠。對您而言，權勢名利皆如浮雲，唯有伴隨孩子平安長大，才是最純粹的幸福。", 
-                color: "#f39c12" 
-            };
-        } else {
-            return { 
-                title: "【賢德夫人】", 
-                desc: "您以和為貴，寬厚待人，這七日來與後宅眾人建立了深厚的信任。您用包容與智慧化解了種種難題，讓原本冷清的侯府充滿了人情味。您成為了府中人人敬重的賢德主母。", 
-                color: "#3498db" 
-            };
-        }
+        if (player.health < 30) return { title: "【積勞成疾】", desc: "您將所有精力都傾注在侯府與孩子身上，雖然保全了體面，卻忽略了自己。太醫強烈建議您必須長年臥床休養。這是一條充滿犧牲的道路。", color: "#c0392b" };
+        if (highestRoute === 'power') return { title: "【權傾侯府】", desc: "經過這七日的歷練，您展現出卓越的管家手腕與非凡的氣度。恩威並施之下，侯府上下對您心服口服。您成為了這深宅大院中，無人能撼動的當家主母。", color: "#8e44ad" };
+        if (highestRoute === 'medical') return { title: "【妙手神醫】", desc: "您悉心研讀醫理，將科學的調養之道與傳統智慧完美融合。這份珍貴的照護經驗更傳承給了府中的下人，在京城醫界留下了佳話。", color: "#27ae60" };
+        if (highestRoute === 'family') return { title: "【母慈子孝】", desc: "您將滿腔的溫柔與心血都傾注在孩兒身上。母子連心的羈絆，成為您在這深宅中最堅實的依靠。唯有伴隨孩子平安長大，才是最純粹的幸福。", color: "#f39c12" };
+        return { title: "【賢德夫人】", desc: "您以和為貴，寬厚待人，這七日來與後宅眾人建立了深厚的信任。您用包容與智慧化解了種種難題，成為了府中人人敬重的賢德主母。", color: "#2980b9" };
     }
 
-    // --- 粒子特效 ---
-    class DustParticle {
-        constructor() {
+    // --- 高階粒子與環境系統 ---
+    class Particle {
+        constructor(type) {
+            this.type = type; // 'dust', 'petal', 'snow'
             this.x = Math.random() * cw; this.y = Math.random() * ch;
-            this.size = Math.random() * 2 + 0.5;
-            this.vx = (Math.random() - 0.5) * 0.5; this.vy = (Math.random() - 0.5) * 0.5 - 0.2;
+            this.size = Math.random() * (type === 'petal' ? 4 : 2) + 1;
+            this.vx = (Math.random() - 0.5) * (type === 'snow' ? 1 : 0.5); 
+            this.vy = type === 'dust' ? (Math.random() - 0.5) * 0.5 : (Math.random() * 1 + 0.5);
             this.life = Math.random() * Math.PI * 2;
         }
         update(dt) {
-            this.x += this.vx + Math.sin(time + this.life) * 0.5; this.y += this.vy; this.life += dt;
-            if (this.y < 0) this.y = ch; if (this.x < 0) this.x = cw; if (this.x > cw) this.x = 0;
+            this.x += this.vx + Math.sin(time + this.life) * (this.type === 'petal' ? 1 : 0.5); 
+            this.y += this.vy; this.life += dt;
+            if (this.y > ch || this.y < 0) this.y = this.vy > 0 ? 0 : ch; 
+            if (this.x < 0) this.x = cw; if (this.x > cw) this.x = 0;
         }
         draw(ctx) {
-            let alpha = (Math.sin(this.life * 2) + 1) * 0.3;
-            ctx.fillStyle = `rgba(255, 220, 150, ${alpha})`;
-            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
+            let alpha = (Math.sin(this.life * 2) + 1) * 0.4;
+            ctx.beginPath();
+            if(this.type === 'petal') {
+                ctx.fillStyle = `rgba(255, 180, 200, ${alpha})`;
+                ctx.ellipse(this.x, this.y, this.size, this.size*0.6, this.life, 0, Math.PI*2);
+            } else if (this.type === 'snow') {
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha + 0.2})`;
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+            } else {
+                ctx.fillStyle = `rgba(255, 220, 150, ${alpha})`;
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+            }
+            ctx.fill();
         }
     }
-    let dustParticles = [];
-    for(let i=0; i<40; i++) dustParticles.push(new DustParticle());
+    let particles = [];
+    for(let i=0; i<40; i++) particles.push(new Particle('dust'));
 
-    // --- Live2D 渲染引擎 ---
-    class ProceduralLive2DCharacter {
-        constructor(role, customColors = null) {
+    function updateWeather(weather) {
+        particles = [];
+        let count = weather === 'snowy' ? 60 : (weather === 'cloudy' ? 20 : 40);
+        let type = weather === 'snowy' ? 'snow' : (weather === 'cloudy' ? 'petal' : 'dust');
+        for(let i=0; i<count; i++) particles.push(new Particle(type));
+    }
+
+    // --- 高階古風人物渲染引擎 (半寫實美型) ---
+    class PremiumLive2DCharacter {
+        constructor(role, customColors) {
             this.role = role; 
-            this.breathingPhase = Math.random() * Math.PI;
-            this.hairPhase = Math.random() * Math.PI;
-            this.blinkTimer = Math.random() * 3;
-            this.eyeOpenness = 1;
-            
-            this.targetEmotion = { smile: 0, browAngle: 0, eyeWide: 1.0 };
-            this.currentEmotion = { smile: 0, browAngle: 0, eyeWide: 1.0 };
-            
-            this.appearScale = 0;
-            this.appearY = 100;
-            
-            this.colors = customColors || {
-                skinBase: '#fae3d9', skinShadow: '#d9a896', skinHighlight: '#fff1ec',
-                hairDark: '#0a0b10', hairLight: '#2c2f3f',
-                silkBase: '#8b1e28', silkShadow: '#4a0e14', goldTrim: '#d4af37'
-            };
+            this.bPhase = Math.random() * Math.PI; this.hPhase = Math.random() * Math.PI;
+            this.blink = Math.random() * 3; this.eyeOpen = 1;
+            this.targetExpr = { smile: 0, brow: 0, eye: 1.0 }; this.currExpr = { smile: 0, brow: 0, eye: 1.0 };
+            this.scale = 0; this.y = 100;
+            this.colors = customColors;
         }
 
-        setEmotion(emotionType) {
-            switch(emotionType) {
-                case 'happy': this.targetEmotion = { smile: 1.2, browAngle: 0.3, eyeWide: 0.9 }; break;
-                case 'shocked': this.targetEmotion = { smile: -0.3, browAngle: 0.6, eyeWide: 1.3 }; break;
-                case 'angry': this.targetEmotion = { smile: -0.6, browAngle: -0.7, eyeWide: 0.9 }; break;
-                default: this.targetEmotion = { smile: 0.2, browAngle: 0, eyeWide: 1.0 }; break;
+        setEmotion(type) {
+            switch(type) {
+                case 'happy': this.targetExpr = { smile: 1.5, brow: 0.4, eye: 0.9 }; break;
+                case 'shocked': this.targetExpr = { smile: -0.5, brow: 0.8, eye: 1.2 }; break;
+                case 'angry': this.targetExpr = { smile: -0.8, brow: -0.8, eye: 0.85 }; break;
+                default: this.targetExpr = { smile: 0.2, brow: 0, eye: 1.0 }; break;
             }
         }
 
         update(dt) {
-            let breathSpeed = this.role === 'chef' ? 1.0 : 1.5;
-            if (this.currentEmotion.smile < -0.3) breathSpeed *= 1.5; 
-            this.breathingPhase += dt * breathSpeed; 
-            
-            this.hairPhase += dt * 2.0;
-
-            this.blinkTimer -= dt;
-            if (this.blinkTimer <= 0) {
-                this.eyeOpenness -= dt * 15;
-                if (this.eyeOpenness <= 0) {
-                    this.eyeOpenness = 0;
-                    this.blinkTimer = Math.random() * 3 + 2; 
-                }
-            } else {
-                this.eyeOpenness += dt * 10;
-                if (this.eyeOpenness > 1) this.eyeOpenness = 1;
-            }
-
-            this.currentEmotion.smile += (this.targetEmotion.smile - this.currentEmotion.smile) * dt * 5;
-            this.currentEmotion.browAngle += (this.targetEmotion.browAngle - this.currentEmotion.browAngle) * dt * 5;
-            this.currentEmotion.eyeWide += (this.targetEmotion.eyeWide - this.currentEmotion.eyeWide) * dt * 5;
-            
-            this.appearScale += (1 - this.appearScale) * dt * 8;
-            this.appearY += (0 - this.appearY) * dt * 8;
+            this.bPhase += dt * 1.2; this.hPhase += dt * 1.5;
+            this.blink -= dt;
+            if (this.blink <= 0) { this.eyeOpen -= dt * 20; if (this.eyeOpen <= 0) { this.eyeOpen = 0; this.blink = Math.random() * 3 + 2; } } 
+            else { this.eyeOpen += dt * 15; if (this.eyeOpen > 1) this.eyeOpen = 1; }
+            this.currExpr.smile += (this.targetExpr.smile - this.currExpr.smile) * dt * 6;
+            this.currExpr.brow += (this.targetExpr.brow - this.currExpr.brow) * dt * 6;
+            this.currExpr.eye += (this.targetExpr.eye - this.currExpr.eye) * dt * 6;
+            this.scale += (1 - this.scale) * dt * 6; this.y += (0 - this.y) * dt * 6;
         }
 
-        resetAppearance() {
-            this.appearScale = 0.5;
-            this.appearY = 50;
-        }
+        reset() { this.scale = 0.5; this.y = 50; }
 
-        draw(ctx, cx, cy, scale, isMini = false) {
+        draw(ctx, cx, cy, baseScale, isMini = false) {
             ctx.save();
-            ctx.translate(cx, cy + (isMini ? 0 : this.appearY));
-            ctx.scale(scale * (isMini ? 1 : this.appearScale), scale * (isMini ? 1 : this.appearScale));
+            ctx.translate(cx, cy + (isMini ? 0 : this.y));
+            ctx.scale(baseScale * (isMini ? 1 : this.scale), baseScale * (isMini ? 1 : this.scale));
 
-            let breathY = Math.sin(this.breathingPhase) * 3;
-            let breathScale = 1 + Math.sin(this.breathingPhase) * 0.005;
-            let swayX = Math.sin(this.hairPhase) * 4;
-            let swayY = Math.cos(this.hairPhase * 0.8) * 2;
+            let breathY = Math.sin(this.bPhase) * 2;
+            let swayX = Math.sin(this.hPhase) * 3;
+            let lookX = isMini ? 0 : (mouse.x - cx) * 0.01;
+            let lookY = isMini ? 0 : (mouse.y - cy) * 0.01;
 
-            let lookDx = isMini ? 0 : (mouse.x - cx) * 0.015;
-            let lookDy = isMini ? 0 : (mouse.y - cy) * 0.015;
-
-            this.drawBackHair(ctx, swayX, swayY);
-
-            ctx.save();
-            ctx.translate(lookDx * 0.5, breathY);
-            ctx.scale(1, breathScale);
+            this.drawHair(ctx, swayX, true); // 後髮
+            
+            ctx.save(); ctx.translate(lookX * 0.4, breathY);
             this.drawBody(ctx, isMini);
             ctx.restore();
 
-            ctx.save();
-            ctx.translate(lookDx, lookDy + breathY * 0.5);
-            this.drawFaceBase(ctx, isMini);
-            
-            ctx.save();
-            ctx.translate(lookDx * 0.3, lookDy * 0.3);
+            ctx.save(); ctx.translate(lookX, lookY + breathY * 0.5);
+            this.drawFace(ctx, isMini);
             this.drawFeatures(ctx);
             ctx.restore();
 
-            this.drawFrontHair(ctx, swayX, swayY);
-            ctx.restore();
-
-            if (!isMini) this.drawCinematicLighting(ctx, cx, cy);
-
+            this.drawHair(ctx, swayX, false); // 前髮
+            
+            if(!isMini && !isCinematic) this.drawLighting(ctx, cx, cy);
             ctx.restore();
         }
 
         drawBody(ctx, isMini) {
-            let silkGrad = ctx.createLinearGradient(0, 0, 0, 300);
-            silkGrad.addColorStop(0, this.colors.silkBase);
-            silkGrad.addColorStop(1, this.colors.silkShadow);
-
-            ctx.fillStyle = silkGrad;
-            ctx.shadowColor = 'rgba(0,0,0,0.5)';
-            ctx.shadowBlur = isMini ? 0 : 15;
-            
+            // 寫實修長肩頸
+            let silk = ctx.createLinearGradient(0, 0, 0, 350);
+            silk.addColorStop(0, this.colors.cloth1); silk.addColorStop(1, this.colors.cloth2);
+            ctx.fillStyle = silk;
+            ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = isMini ? 0 : 20;
             ctx.beginPath();
-            if (this.role === 'chef') {
-                ctx.moveTo(-170, 300); ctx.quadraticCurveTo(-120, 80, -40, 80); ctx.lineTo(40, 80); ctx.quadraticCurveTo(120, 80, 170, 300);
-            } else if (this.role === 'doctor') {
-                ctx.moveTo(-140, 300); ctx.lineTo(-90, 80); ctx.lineTo(90, 80); ctx.lineTo(140, 300);
+            if (this.role === 'chef' || this.role === 'doctor') {
+                ctx.moveTo(-160, 350); ctx.quadraticCurveTo(-110, 100, -40, 90); ctx.lineTo(40, 90); ctx.quadraticCurveTo(110, 100, 160, 350);
             } else {
-                ctx.moveTo(-130, 300); ctx.quadraticCurveTo(-90, 80, -30, 80); ctx.lineTo(30, 80); ctx.quadraticCurveTo(90, 80, 130, 300);
+                ctx.moveTo(-140, 350); ctx.quadraticCurveTo(-80, 90, -25, 80); ctx.lineTo(25, 80); ctx.quadraticCurveTo(80, 90, 140, 350);
             }
             ctx.fill(); ctx.shadowBlur = 0;
 
-            let collarGrad = ctx.createLinearGradient(-50, 80, 50, 150);
-            collarGrad.addColorStop(0, '#e6e6e6'); collarGrad.addColorStop(1, '#b3b3b3');
-            ctx.fillStyle = collarGrad;
-            
+            // 交領/圓領細節
+            let collar = ctx.createLinearGradient(-40, 80, 40, 160);
+            collar.addColorStop(0, '#f5f5f5'); collar.addColorStop(1, '#dcdcdc');
+            ctx.fillStyle = collar;
+            ctx.beginPath();
             if (this.role === 'doctor') {
-                ctx.beginPath(); ctx.arc(0, 100, 50, Math.PI, 0); ctx.lineTo(50,120); ctx.lineTo(-50,120); ctx.fill();
+                ctx.arc(0, 105, 45, Math.PI, 0); ctx.lineTo(45,130); ctx.lineTo(-45,130); ctx.fill();
             } else {
-                ctx.beginPath(); ctx.moveTo(-50, 80); ctx.lineTo(0, 140); ctx.lineTo(50, 80); ctx.lineTo(80, 100); ctx.lineTo(0, 200); ctx.lineTo(-80, 100); ctx.fill();
+                ctx.moveTo(-45, 80); ctx.lineTo(0, 150); ctx.lineTo(45, 80); ctx.lineTo(70, 100); ctx.lineTo(0, 210); ctx.lineTo(-70, 100); ctx.fill();
             }
 
-            if (this.colors.goldTrim) {
-                ctx.strokeStyle = this.colors.goldTrim; ctx.lineWidth = 3;
-                ctx.beginPath(); ctx.moveTo(-70, 95); ctx.lineTo(0, 190); ctx.lineTo(70, 95); ctx.stroke();
-            }
-            
-            let neckGrad = ctx.createLinearGradient(0, 50, 0, 90);
-            neckGrad.addColorStop(0, this.colors.skinShadow); neckGrad.addColorStop(1, this.colors.skinBase);
-            ctx.fillStyle = neckGrad;
-            ctx.beginPath(); 
-            if(this.role === 'chef') {
-                ctx.moveTo(-30, 40); ctx.lineTo(30, 40); ctx.lineTo(35, 90); ctx.lineTo(-35, 90); 
-            } else {
-                ctx.moveTo(-20, 40); ctx.lineTo(20, 40); ctx.lineTo(25, 90); ctx.lineTo(-25, 90); 
-            }
-            ctx.fill();
+            // 頸部與鎖骨陰影
+            let neck = ctx.createLinearGradient(0, 40, 0, 90);
+            neck.addColorStop(0, this.colors.skinShadow); neck.addColorStop(1, this.colors.skinBase);
+            ctx.fillStyle = neck;
+            ctx.beginPath(); ctx.moveTo(-20, 30); ctx.lineTo(20, 30); ctx.lineTo(28, 90); ctx.lineTo(-28, 90); ctx.fill();
         }
 
-        drawFaceBase(ctx, isMini) {
-            let faceGrad = ctx.createRadialGradient(0, -20, 10, 0, 0, 80);
-            faceGrad.addColorStop(0, this.colors.skinHighlight);
-            faceGrad.addColorStop(0.7, this.colors.skinBase);
-            faceGrad.addColorStop(1, this.colors.skinShadow);
-
-            ctx.fillStyle = faceGrad;
-            ctx.shadowColor = 'rgba(0,0,0,0.2)'; ctx.shadowBlur = isMini ? 0 : 10;
+        drawFace(ctx, isMini) {
+            // 半寫實瓜子臉
+            let face = ctx.createRadialGradient(0, -10, 10, 0, 0, 90);
+            face.addColorStop(0, this.colors.skinHigh); face.addColorStop(0.6, this.colors.skinBase); face.addColorStop(1, this.colors.skinShadow);
+            ctx.fillStyle = face;
+            ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = isMini ? 0 : 15;
             
             ctx.beginPath();
             if (this.role === 'chef') {
-                ctx.moveTo(0, 70); ctx.bezierCurveTo(60, 60, 75, 0, 65, -40); ctx.bezierCurveTo(60, -80, -60, -80, -65, -40); ctx.bezierCurveTo(-75, 0, -60, 60, 0, 70);
+                ctx.moveTo(0, 75); ctx.bezierCurveTo(60, 65, 75, 0, 65, -45); ctx.bezierCurveTo(60, -90, -60, -90, -65, -45); ctx.bezierCurveTo(-75, 0, -60, 65, 0, 75);
             } else if (this.role === 'doctor') {
-                ctx.moveTo(0, 65); ctx.bezierCurveTo(40, 50, 50, 0, 45, -40); ctx.bezierCurveTo(40, -80, -40, -80, -45, -40); ctx.bezierCurveTo(-50, 0, -40, 50, 0, 65);
+                ctx.moveTo(0, 70); ctx.bezierCurveTo(45, 55, 55, 0, 50, -45); ctx.bezierCurveTo(45, -90, -45, -90, -50, -45); ctx.bezierCurveTo(-55, 0, -45, 55, 0, 70);
             } else {
-                ctx.moveTo(0, 60); ctx.bezierCurveTo(45, 50, 55, 0, 50, -40); ctx.bezierCurveTo(45, -80, -45, -80, -50, -40); ctx.bezierCurveTo(-55, 0, -45, 50, 0, 60);
+                // 女性細長臉型
+                ctx.moveTo(0, 65); ctx.bezierCurveTo(35, 55, 50, 0, 45, -50); ctx.bezierCurveTo(40, -90, -40, -90, -45, -50); ctx.bezierCurveTo(-50, 0, -35, 55, 0, 65);
             }
             ctx.fill(); ctx.shadowBlur = 0;
 
-            if (this.role === 'player' || this.role === 'maid' || this.role === 'medic') {
+            // 腮紅 (僅女性)
+            if (this.role !== 'chef' && this.role !== 'doctor') {
                 ctx.globalCompositeOperation = 'multiply';
-                let blushGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 20);
-                blushGrad.addColorStop(0, 'rgba(255, 100, 100, 0.18)'); blushGrad.addColorStop(1, 'rgba(255, 100, 100, 0)');
-                ctx.save(); ctx.translate(-35, 10); ctx.fillStyle = blushGrad; ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill(); ctx.restore();
-                ctx.save(); ctx.translate(35, 10); ctx.fillStyle = blushGrad; ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill(); ctx.restore();
+                let blush = ctx.createRadialGradient(0, 0, 0, 0, 0, 25);
+                blush.addColorStop(0, 'rgba(230, 100, 110, 0.15)'); blush.addColorStop(1, 'rgba(230, 100, 110, 0)');
+                ctx.save(); ctx.translate(-30, 15); ctx.fillStyle = blush; ctx.beginPath(); ctx.arc(0,0,25,0,Math.PI*2); ctx.fill(); ctx.restore();
+                ctx.save(); ctx.translate(30, 15); ctx.fillStyle = blush; ctx.beginPath(); ctx.arc(0,0,25,0,Math.PI*2); ctx.fill(); ctx.restore();
                 ctx.globalCompositeOperation = 'source-over';
             }
         }
 
         drawFeatures(ctx) {
-            ctx.strokeStyle = '#2a1a10'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-            let browY = -35; let browA = this.currentEmotion.browAngle * 10;
-            
-            if(this.role === 'doctor' || this.role === 'chef') { ctx.lineWidth = 4; browY = -30; }
+            // 寫實眉毛
+            ctx.strokeStyle = this.role==='doctor'?'#2a2a2a':'#4a3a30'; ctx.lineWidth = this.role==='doctor'?3:1.5; ctx.lineCap = 'round';
+            let bY = -35; let bA = this.currExpr.brow * 8;
+            ctx.beginPath(); ctx.moveTo(-40, bY - bA); ctx.quadraticCurveTo(-25, bY - 3, -12, bY + bA); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(40, bY - bA); ctx.quadraticCurveTo(25, bY - 3, 12, bY + bA); ctx.stroke();
 
-            ctx.beginPath(); ctx.moveTo(-45, browY - browA); ctx.quadraticCurveTo(-30, browY - 5, -15, browY + browA); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(45, browY - browA); ctx.quadraticCurveTo(30, browY - 5, 15, browY + browA); ctx.stroke();
-
-            let eyeY = -10;
-            let eyeMod = (this.role === 'doctor' || this.role === 'chef') ? 0.6 : 1.0;
-            let eyeScaleY = this.eyeOpenness * this.currentEmotion.eyeWide * eyeMod;
+            // 寫實眼眸 (狹長桃花眼)
+            let eyeY = -12;
+            let eyeS = this.eyeOpen * this.currExpr.eye * (this.role==='doctor'?0.7:1);
             
             const drawEye = (ex, ey, flip) => {
                 ctx.save(); ctx.translate(ex, ey); ctx.scale(flip ? -1 : 1, 1);
                 
-                ctx.fillStyle = '#fcfcfc'; 
-                ctx.beginPath(); ctx.moveTo(-15, 0); ctx.quadraticCurveTo(0, -12 * eyeScaleY, 15, 0); ctx.quadraticCurveTo(0, 4 * eyeScaleY, -15, 0); ctx.fill();
+                // 眼白
+                ctx.fillStyle = '#fdfdfd'; 
+                ctx.beginPath(); ctx.moveTo(-16, 0); ctx.quadraticCurveTo(-2, -10 * eyeS, 14, 2); ctx.quadraticCurveTo(-2, 4 * eyeS, -16, 0); ctx.fill();
 
-                if (eyeScaleY > 0.1) {
-                    ctx.save(); ctx.beginPath(); ctx.moveTo(-15, 0); ctx.quadraticCurveTo(0, -12 * eyeScaleY, 15, 0); ctx.quadraticCurveTo(0, 4 * eyeScaleY, -15, 0); ctx.clip();
-                    let irisGrad = ctx.createRadialGradient(0, 2, 0, 0, 0, 8);
-                    irisGrad.addColorStop(0, (this.role==='player')?'#8c5a35':'#4a3020'); 
-                    irisGrad.addColorStop(1, '#1a0a05');
-                    ctx.fillStyle = irisGrad; ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI*2); ctx.fill();
-                    ctx.fillStyle = '#0a0502'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
-                    
-                    if(this.role !== 'chef' && this.role !== 'doctor') {
-                        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; ctx.beginPath(); ctx.arc(-3, -3, 2, 0, Math.PI*2); ctx.fill();
-                        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'; ctx.beginPath(); ctx.arc(3, 3, 1.5, 0, Math.PI*2); ctx.fill();
-                    } else {
-                        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'; ctx.beginPath(); ctx.arc(-2, -2, 1.5, 0, Math.PI*2); ctx.fill();
-                    }
-                    ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.arc(0, -8, 10, 0, Math.PI*2); ctx.fill();
+                if (eyeS > 0.1) {
+                    ctx.save(); ctx.beginPath(); ctx.moveTo(-16, 0); ctx.quadraticCurveTo(-2, -10 * eyeS, 14, 2); ctx.quadraticCurveTo(-2, 4 * eyeS, -16, 0); ctx.clip();
+                    // 虹膜漸層
+                    let iris = ctx.createRadialGradient(-1, 1, 0, 0, 0, 8);
+                    iris.addColorStop(0, this.role==='player'?'#7a5a40':(this.role==='medic'?'#3a4a50':'#3a2a20')); 
+                    iris.addColorStop(1, '#111');
+                    ctx.fillStyle = iris; ctx.beginPath(); ctx.arc(-2, 0, 6.5, 0, Math.PI*2); ctx.fill();
+                    // 瞳孔
+                    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(-2, 0, 2.5, 0, Math.PI*2); ctx.fill();
+                    // 高光
+                    ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.beginPath(); ctx.arc(-4, -2, 1.5, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.arc(1, 2, 1, 0, Math.PI*2); ctx.fill();
+                    // 睫毛陰影
+                    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.arc(0, -9, 10, 0, Math.PI*2); ctx.fill();
                     ctx.restore(); 
                 }
 
-                ctx.strokeStyle = '#1a0a05'; ctx.lineWidth = (this.role === 'player' || this.role === 'maid') ? 3.5 : 2;
-                ctx.beginPath(); ctx.moveTo(-18, 2); ctx.quadraticCurveTo(0, -14 * eyeScaleY, 18, 2); ctx.stroke();
-                
-                if(this.role === 'player' || this.role === 'maid' || this.role === 'medic') {
-                    ctx.lineWidth = 1.5;
-                    ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(22, -6 * eyeScaleY); ctx.stroke();
+                // 上眼線
+                ctx.strokeStyle = '#1a1010'; ctx.lineWidth = this.role==='doctor'?1.5:2.5;
+                ctx.beginPath(); ctx.moveTo(-18, 1); ctx.quadraticCurveTo(-2, -12 * eyeS, 16, 3); ctx.stroke();
+                // 雙眼皮
+                if(this.role !== 'chef') {
+                    ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 0.8;
+                    ctx.beginPath(); ctx.moveTo(-14, -4); ctx.quadraticCurveTo(-2, -15 * eyeS, 14, -1); ctx.stroke();
                 }
                 ctx.restore();
             };
+            drawEye(-22, eyeY, false); drawEye(22, eyeY, true);
 
-            drawEye(-25, eyeY, false); drawEye(25, eyeY, true);
-
-            ctx.fillStyle = this.colors.skinShadow; ctx.beginPath(); ctx.arc(0, 15, (this.role==='chef')?3:1.5, 0, Math.PI*2); ctx.fill();
+            // 鼻影
+            ctx.fillStyle = this.colors.skinShadow; ctx.beginPath(); ctx.arc(0, 18, 1.5, 0, Math.PI*2); ctx.fill();
             
-            let mouthY = 35; let smile = this.currentEmotion.smile * 5;
-            let lipGrad = ctx.createLinearGradient(0, mouthY-2, 0, mouthY+5);
-            lipGrad.addColorStop(0, (this.role==='doctor'||this.role==='chef')?'#a67c7c':'#c75c5c'); 
-            lipGrad.addColorStop(1, (this.role==='doctor'||this.role==='chef')?'#8a5c5c':'#a63c3c');
-            
-            ctx.fillStyle = lipGrad; ctx.strokeStyle = (this.role==='doctor'||this.role==='chef')?'#6b3b3b':'#8a2b2b'; ctx.lineWidth = 1.5;
-            ctx.beginPath(); ctx.moveTo(-10, mouthY - smile*0.5); ctx.quadraticCurveTo(0, mouthY + smile, 10, mouthY - smile*0.5); ctx.quadraticCurveTo(0, mouthY + 3 + smile, -10, mouthY - smile*0.5);
+            // 嘴唇 (櫻桃小嘴)
+            let mY = 38; let s = this.currExpr.smile * 4;
+            let lip = ctx.createLinearGradient(0, mY-2, 0, mY+4);
+            lip.addColorStop(0, this.role==='doctor'?'#9a7070':'#c05055'); lip.addColorStop(1, this.role==='doctor'?'#7a5050':'#903035');
+            ctx.fillStyle = lip; ctx.strokeStyle = this.role==='doctor'?'#5a3a3a':'#7a2a2a'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(-8, mY - s*0.5); ctx.quadraticCurveTo(0, mY + s, 8, mY - s*0.5); ctx.quadraticCurveTo(0, mY + 2 + s, -8, mY - s*0.5);
             ctx.fill(); ctx.stroke();
-
-            if (this.role === 'doctor') {
-                ctx.fillStyle = '#3a3a3a';
-                ctx.beginPath(); ctx.moveTo(-15, 45); ctx.quadraticCurveTo(0, 140, 15, 45); ctx.quadraticCurveTo(0, 60, -15, 45); ctx.fill();
-                ctx.beginPath(); ctx.moveTo(-5, 28); ctx.quadraticCurveTo(-25, 35, -30, 45); ctx.quadraticCurveTo(-15, 30, -5, 28); ctx.fill();
-                ctx.beginPath(); ctx.moveTo(5, 28); ctx.quadraticCurveTo(25, 35, 30, 45); ctx.quadraticCurveTo(15, 30, 5, 28); ctx.fill();
-            } else if (this.role === 'chef') {
-                ctx.fillStyle = '#1a100a';
-                ctx.beginPath(); ctx.moveTo(-8, 26); ctx.quadraticCurveTo(-25, 30, -35, 40); ctx.quadraticCurveTo(-15, 38, -8, 30); ctx.fill();
-                ctx.beginPath(); ctx.moveTo(8, 26); ctx.quadraticCurveTo(25, 30, 35, 40); ctx.quadraticCurveTo(15, 38, 8, 30); ctx.fill();
-            }
         }
 
-        drawBackHair(ctx, swayX, swayY) {
-            if (this.role === 'chef' || this.role === 'doctor') return; 
-            
-            let hGrad = ctx.createLinearGradient(0, -100, 0, 300);
-            hGrad.addColorStop(0, this.colors.hairLight); hGrad.addColorStop(1, '#000000');
-            ctx.fillStyle = hGrad;
-            
-            if (this.role === 'player') {
-                ctx.beginPath(); ctx.moveTo(-50, -50); ctx.bezierCurveTo(-100, 50, -120 + swayX, 200, -80 + swayX*1.5, 300 + swayY);
-                ctx.lineTo(80 + swayX*1.5, 300 + swayY); ctx.bezierCurveTo(120 + swayX, 200, 100, 50, 50, -50); ctx.fill();
-            } else if (this.role === 'maid') {
-                ctx.beginPath(); ctx.moveTo(-40, -50); ctx.bezierCurveTo(-80, 50, -90 + swayX, 120, -70 + swayX, 150 + swayY);
-                ctx.lineTo(70 + swayX, 150 + swayY); ctx.bezierCurveTo(90 + swayX, 120, 80, 50, 40, -50); ctx.fill();
-            } else if (this.role === 'medic') {
-                ctx.beginPath(); ctx.arc(0, -30, 50, 0, Math.PI*2); ctx.fill();
-            }
-        }
-
-        drawFrontHair(ctx, swayX, swayY) {
-            ctx.fillStyle = this.colors.hairDark;
-
-            if (this.role === 'chef') {
-                ctx.fillStyle = '#6e523f'; ctx.beginPath(); ctx.arc(0, -45, 55, Math.PI, 0); ctx.fill(); 
-                ctx.fillRect(-55, -45, 110, 20); ctx.fillStyle = '#4a3528'; ctx.fillRect(-55, -30, 110, 5); 
-                return;
-            }
-            if (this.role === 'doctor') {
-                ctx.fillStyle = '#111'; ctx.fillRect(-45, -90, 90, 60); ctx.beginPath(); ctx.arc(0, -90, 45, Math.PI, 0); ctx.fill();
-                ctx.fillRect(-50, -30, 100, 10); ctx.fillStyle = '#0a0a0a'; ctx.fillRect(-120, -45, 70, 15); ctx.fillRect(50, -45, 70, 15);
-                return;
-            }
-
-            ctx.beginPath(); ctx.arc(0, -50, 60, Math.PI, 0); ctx.fill();
-
-            const drawStrand = (sx, sy, c1x, c1y, c2x, c2y, ex, ey, w) => {
-                ctx.beginPath(); ctx.moveTo(sx, sy); ctx.bezierCurveTo(c1x, c1y, c2x, c2y, ex, ey); 
-                ctx.bezierCurveTo(c2x + w, c2y, c1x + w, c1y, sx + w, sy); ctx.fill();
-            };
-
-            let hGrad = ctx.createLinearGradient(0, -100, 0, 50);
-            hGrad.addColorStop(0, this.colors.hairLight); hGrad.addColorStop(1, this.colors.hairDark);
+        drawHair(ctx, sway, isBack) {
+            let hGrad = ctx.createLinearGradient(0, -100, 0, isBack?300:50);
+            hGrad.addColorStop(0, this.colors.hairLight); hGrad.addColorStop(1, isBack?'#000':this.colors.hairDark);
             ctx.fillStyle = hGrad;
 
-            if (this.role === 'player') {
-                drawStrand(-55, -20, -70, 20, -75 + swayX, 80, -65 + swayX, 120 + swayY, 15);
-                drawStrand(40, -20, 55, 20, 60 + swayX, 80, 50 + swayX, 120 + swayY, 15);
-                drawStrand(-20, -60, -30, -20, -25 + swayX*0.2, 0, -10 + swayX*0.5, 10, 20);
-                drawStrand(0, -60, 10, -20, 15 + swayX*0.2, 0, 25 + swayX*0.5, -5, 25);
+            if (isBack) {
+                if (this.role === 'chef' || this.role === 'doctor') return;
+                ctx.beginPath();
+                if (this.role === 'player') {
+                    ctx.moveTo(-45, -50); ctx.bezierCurveTo(-90, 50, -110+sway, 250, -70+sway*1.5, 350);
+                    ctx.lineTo(70+sway*1.5, 350); ctx.bezierCurveTo(110+sway, 250, 90, 50, 45, -50);
+                } else if (this.role === 'maid') {
+                    ctx.moveTo(-35, -50); ctx.bezierCurveTo(-70, 50, -80+sway, 150, -60+sway, 180);
+                    ctx.lineTo(60+sway, 180); ctx.bezierCurveTo(80+sway, 150, 70, 50, 35, -50);
+                } else if (this.role === 'medic') {
+                    ctx.arc(0, -30, 45, 0, Math.PI*2);
+                }
+                ctx.fill();
+            } else {
+                if (this.role === 'chef') { ctx.beginPath(); ctx.arc(0, -50, 50, Math.PI, 0); ctx.fill(); return; }
+                if (this.role === 'doctor') { ctx.fillRect(-45, -95, 90, 50); ctx.beginPath(); ctx.arc(0, -95, 45, Math.PI, 0); ctx.fill(); return; }
                 
-                ctx.strokeStyle = this.colors.goldTrim; ctx.lineWidth = 2;
-                ctx.beginPath(); ctx.moveTo(-50, -40); ctx.lineTo(-70 + swayX*1.5, 10 + swayY*1.5); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(50, -40); ctx.lineTo(70 + swayX*1.5, 10 + swayY*1.5); ctx.stroke();
-                ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(-70 + swayX*1.5, 10 + swayY*1.5, 4, 0, Math.PI*2); ctx.fill();
-                ctx.beginPath(); ctx.arc(70 + swayX*1.5, 10 + swayY*1.5, 4, 0, Math.PI*2); ctx.fill();
-            } 
-            else if (this.role === 'maid') {
-                ctx.beginPath(); ctx.arc(-45, -80, 25, 0, Math.PI*2); ctx.fill();
-                ctx.beginPath(); ctx.arc(45, -80, 25, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 4;
-                ctx.beginPath(); ctx.arc(-45, -80, 25, 0, Math.PI); ctx.stroke();
-                ctx.beginPath(); ctx.arc(45, -80, 25, 0, Math.PI); ctx.stroke();
-                drawStrand(-25, -55, -30, -20, -15, -10, -5, 0, 25);
-                drawStrand(0, -55, 10, -20, 20, -10, 30, -5, 25);
-            }
-            else if (this.role === 'medic') {
-                ctx.fillStyle = '#d4e6f1'; ctx.beginPath(); ctx.arc(0, -60, 58, Math.PI, 0); ctx.fill();
-                ctx.fillRect(-58, -60, 116, 25); ctx.fillStyle = '#a9cce3'; ctx.fillRect(-58, -35, 116, 5);
-                drawStrand(-45, -35, -50, 0, -40 + swayX*0.5, 20, -30 + swayX*0.5, 40, 15);
-                drawStrand(30, -35, 40, 0, 45 + swayX*0.5, 20, 35 + swayX*0.5, 40, 15);
-            }
-
-            if(this.role !== 'medic') {
-                ctx.globalCompositeOperation = 'screen';
-                let haloGrad = ctx.createLinearGradient(0, -70, 0, -40);
-                haloGrad.addColorStop(0, 'rgba(255,255,255,0)'); haloGrad.addColorStop(0.5, 'rgba(150, 160, 200, 0.3)'); haloGrad.addColorStop(1, 'rgba(255,255,255,0)');
-                ctx.fillStyle = haloGrad; ctx.beginPath(); ctx.ellipse(0, -55, 50, 12, 0, 0, Math.PI*2); ctx.fill();
-                ctx.globalCompositeOperation = 'source-over';
+                ctx.beginPath(); ctx.arc(0, -55, 55, Math.PI, 0); ctx.fill();
+                const strand = (sx, sy, cx1, cy1, cx2, cy2, ex, ey, w) => {
+                    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.bezierCurveTo(cx1, cy1, cx2, cy2, ex, ey); 
+                    ctx.bezierCurveTo(cx2+w, cy2, cx1+w, cy1, sx+w, sy); ctx.fill();
+                };
+                if (this.role === 'player') {
+                    strand(-50, -25, -60, 20, -65+sway, 90, -55+sway, 130, 12);
+                    strand(40, -25, 50, 20, 55+sway, 90, 45+sway, 130, 12);
+                    strand(-15, -65, -25, -20, -20, 0, -5, 15, 18);
+                    strand(5, -65, 15, -20, 20, 0, 30, -5, 20);
+                } else if (this.role === 'maid') {
+                    ctx.beginPath(); ctx.arc(-40, -85, 20, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(40, -85, 20, 0, Math.PI*2); ctx.fill();
+                    strand(-20, -60, -25, -20, -10, -10, 0, 5, 20);
+                    strand(0, -60, 15, -20, 25, -10, 35, -5, 20);
+                } else if (this.role === 'medic') {
+                    strand(-40, -40, -45, 0, -35+sway*0.5, 30, -25+sway*0.5, 50, 15);
+                    strand(25, -40, 35, 0, 40+sway*0.5, 30, 30+sway*0.5, 50, 15);
+                }
             }
         }
 
-        drawCinematicLighting(ctx, cx, cy) {
+        drawLighting(ctx, cx, cy) {
             let dx = mouse.x - cx; let dy = mouse.y - cy;
             ctx.globalCompositeOperation = 'screen';
-            
-            let rimGrad = ctx.createRadialGradient(dx * 0.5, dy * 0.5, 50, 0, 0, 300);
-            rimGrad.addColorStop(0, 'rgba(212, 175, 55, 0.25)'); 
-            rimGrad.addColorStop(0.5, 'rgba(100, 150, 255, 0.1)'); 
-            rimGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-            
-            ctx.fillStyle = rimGrad; ctx.fillRect(-200, -200, 400, 500);
-
-            let specGrad = ctx.createRadialGradient(dx*0.1, dy*0.1, 0, dx*0.1, dy*0.1, 80);
-            specGrad.addColorStop(0, 'rgba(255, 255, 255, 0.1)'); specGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-            ctx.fillStyle = specGrad; ctx.fillRect(-200, -200, 400, 500);
+            let rim = ctx.createRadialGradient(dx*0.6, dy*0.6, 60, 0, 0, 350);
+            rim.addColorStop(0, 'rgba(255, 230, 180, 0.15)'); rim.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = rim; ctx.fillRect(-200, -200, 400, 550);
             ctx.globalCompositeOperation = 'source-over';
         }
     }
 
-    const mainCharacter = new ProceduralLive2DCharacter('player');
+    const mainCharacter = new PremiumLive2DCharacter('player', { skinBase: '#fdf2ec', skinShadow: '#e6c8bd', skinHigh: '#ffffff', hairDark: '#1a1618', hairLight: '#3a2d32', cloth1: '#e0c9d6', cloth2: '#9e7a8f' });
     const npcs = {
-        maid: new ProceduralLive2DCharacter('maid', { skinBase: '#fae3d9', skinShadow: '#d9a896', skinHighlight: '#fff1ec', hairDark: '#2a1b1d', hairLight: '#4a3236', silkBase: '#d48a9a', silkShadow: '#9c5263', goldTrim: null }),
-        chef: new ProceduralLive2DCharacter('chef', { skinBase: '#eac5a9', skinShadow: '#b89074', skinHighlight: '#fdebe0', hairDark: '#241a12', hairLight: '#4a3728', silkBase: '#8c6b4a', silkShadow: '#5c4128', goldTrim: null }),
-        doctor: new ProceduralLive2DCharacter('doctor', { skinBase: '#e3d0c1', skinShadow: '#b39c8a', skinHighlight: '#faecd9', hairDark: '#121212', hairLight: '#333333', silkBase: '#3a5a4a', silkShadow: '#1a3326', goldTrim: '#b1e6c8' }),
-        medic: new ProceduralLive2DCharacter('medic', { skinBase: '#fae3d9', skinShadow: '#d9a896', skinHighlight: '#fff1ec', hairDark: '#1a242c', hairLight: '#3a4a56', silkBase: '#6a9ab0', silkShadow: '#365b6e', goldTrim: null })
+        maid: new PremiumLive2DCharacter('maid', { skinBase: '#fae3d9', skinShadow: '#d9a896', skinHigh: '#fff1ec', hairDark: '#2a1b1d', hairLight: '#4a3236', cloth1: '#f2aebf', cloth2: '#c4697d' }),
+        chef: new PremiumLive2DCharacter('chef', { skinBase: '#eac5a9', skinShadow: '#b89074', skinHigh: '#fdebe0', hairDark: '#241a12', hairLight: '#4a3728', cloth1: '#8c6b4a', cloth2: '#5c4128' }),
+        doctor: new PremiumLive2DCharacter('doctor', { skinBase: '#e3d0c1', skinShadow: '#b39c8a', skinHigh: '#faecd9', hairDark: '#121212', hairLight: '#333333', cloth1: '#3a5a4a', cloth2: '#1a3326' }),
+        medic: new PremiumLive2DCharacter('medic', { skinBase: '#f4e9e3', skinShadow: '#c9b1a6', skinHigh: '#ffffff', hairDark: '#1a242c', hairLight: '#3a4a56', cloth1: '#7b9fb0', cloth2: '#3e6274' })
     };
 
     let floatingTexts = [];
     class FloatingText {
-        constructor(x, y, text, color) {
-            this.x = x; this.y = y; this.text = text; this.color = color; this.life = 1.0; this.scale = 0.5;
-        }
-        update() { this.y -= 1.2; this.life -= 0.015; this.scale += (1 - this.scale) * 0.2; }
+        constructor(x, y, text, color) { this.x = x; this.y = y; this.text = text; this.color = color; this.life = 1.0; this.s = 0.5; }
+        update() { this.y -= 1; this.life -= 0.012; this.s += (1 - this.s) * 0.15; }
         draw(ctx) {
-            ctx.save(); ctx.globalAlpha = Math.max(0, this.life); ctx.translate(this.x, this.y); ctx.scale(this.scale, this.scale);
-            ctx.fillStyle = this.color; ctx.font = `bold 28px ${FONT_FAMILY}`; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4; 
+            ctx.save(); ctx.globalAlpha = Math.max(0, this.life); ctx.translate(this.x, this.y); ctx.scale(this.s, this.s);
+            ctx.fillStyle = this.color; ctx.font = `bold 26px ${FONT_FAMILY}`; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4; 
             ctx.textAlign = 'center'; ctx.fillText(this.text, 0, 0); ctx.restore();
         }
     }
 
     function applyEffects(effects) {
         let offsetY = ch/2 - 100;
-        let hasPositive = false; 
-        let hasNegative = false;
-
+        let hasPositive = false; let hasNegative = false;
         if (effects) {
-            const statsMap = {
-                'knowledge': '智慧', 'health': '體力', 'reputation': '聲望', 'bond': '羈絆',
-                'virtue': '賢德', 'power': '權謀', 'medical': '醫術', 'family': '親情'
-            };
-
-            for (let key in statsMap) {
+            const sm = { 'knowledge': '智慧', 'health': '體力', 'reputation': '聲望', 'bond': '羈絆', 'virtue': '賢德', 'power': '權謀', 'medical': '醫術', 'family': '親情' };
+            for (let key in sm) {
                 if (effects[key]) {
-                    if (['virtue', 'power', 'medical', 'family'].includes(key)) {
-                        player.routes[key] += effects[key];
-                    } else {
-                        player[key] = Math.max(0, Math.min(100, player[key] + effects[key]));
-                    }
-                    
-                    let color = effects[key] >= 0 ? '#4caf50' : '#e74c3c';
-                    floatingTexts.push(new FloatingText(cw/2, offsetY, `${statsMap[key]} ${effects[key] >= 0 ? '+' : ''}${effects[key]}`, color));
+                    if (['virtue', 'power', 'medical', 'family'].includes(key)) player.routes[key] += effects[key];
+                    else player[key] = Math.max(0, Math.min(100, player[key] + effects[key]));
+                    let color = effects[key] >= 0 ? '#2ecc71' : '#e74c3c';
+                    floatingTexts.push(new FloatingText(cw/2, offsetY, `${sm[key]} ${effects[key]>=0?'+':''}${effects[key]}`, color));
                     offsetY -= 40;
                     if(effects[key] > 0) hasPositive = true; else hasNegative = true;
                 }
             }
-
-            const npcMap = ['maid', 'chef', 'doctor', 'medic'];
-            npcMap.forEach(role => {
-                if (effects[role]) {
-                    let targetChar = player.affections[role];
-                    if (targetChar) {
-                        targetChar.target = Math.max(0, Math.min(targetChar.max, targetChar.target + effects[role])); 
-                        
-                        let tgt = targetChar.target;
-                        if(tgt >= 90) targetChar.status = "★特殊羈絆";
-                        else if(tgt >= 60) targetChar.status = "信任";
-                        else if(tgt >= 30) targetChar.status = "熟悉";
-                        else targetChar.status = "陌生";
-
-                        let color = effects[role] >= 0 ? targetChar.color : "#e74c3c";
-                        floatingTexts.push(new FloatingText(cw/2, offsetY, `${targetChar.name} ${effects[role]>=0?'+':''}${effects[role]}`, color));
+            const nm = ['maid', 'chef', 'doctor', 'medic'];
+            nm.forEach(r => {
+                if (effects[r]) {
+                    let tg = player.affections[r];
+                    if (tg) {
+                        tg.target = Math.max(0, Math.min(tg.max, tg.target + effects[r])); 
+                        let st = tg.target >= 90 ? "★特殊羈絆" : (tg.target >= 60 ? "信任" : (tg.target >= 30 ? "熟悉" : "陌生"));
+                        tg.status = st;
+                        let color = effects[r] >= 0 ? tg.color : "#e74c3c";
+                        floatingTexts.push(new FloatingText(cw/2, offsetY, `${tg.name} ${effects[r]>=0?'+':''}${effects[r]}`, color));
                         offsetY -= 40;
-                        if(effects[role] > 0) hasPositive = true; else hasNegative = true;
+                        if(effects[r] > 0) hasPositive = true; else hasNegative = true;
                     }
                 }
             });
         }
-        
-        if (hasPositive) { bloomIntensity = 1.0; bloomColor = '255,215,0'; } 
-        if (hasNegative) { cameraShake.amount = 12; bloomIntensity = 0.5; bloomColor = '255,0,0'; }
+        if (hasPositive) { bloomIntensity = 0.8; bloomColor = '255,230,180'; } 
+        if (hasNegative) { cameraShake.amount = 10; bloomIntensity = 0.4; bloomColor = '255,100,100'; }
     }
 
     function applyChoice(opt) {
         mainCharacter.setEmotion(opt.expr || 'normal'); 
         selectedOptionFeedback = opt.feedback;
-        
         applyEffects(opt.effects);
         
+        // 觸發 CG 演出 (如果影響力很大)
+        if(opt.effects && (opt.effects.virtue >= 20 || opt.effects.power >= 20 || opt.effects.family >= 20 || opt.effects.medical >= 20)) {
+            isCinematic = true;
+        }
+
         currentState = STATES.FEEDBACK;
     }
 
-    function drawGlassPanel(ctx, x, y, w, h) {
+    function drawPremiumPanel(ctx, x, y, w, h) {
         ctx.save();
-        ctx.fillStyle = 'rgba(12, 16, 24, 0.85)'; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20;
-        ctx.beginPath(); ctx.roundRect(x, y, w, h, 12); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(15, 20, 25, 0.88)'; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 25;
+        ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill(); ctx.shadowBlur = 0;
         
-        let borderGrad = ctx.createLinearGradient(x, y, x, y+h);
-        borderGrad.addColorStop(0, 'rgba(212, 175, 55, 0.8)'); borderGrad.addColorStop(1, 'rgba(212, 175, 55, 0.2)');
-        ctx.strokeStyle = borderGrad; ctx.lineWidth = 2; ctx.stroke();
+        let bGrad = ctx.createLinearGradient(x, y, x, y+h);
+        bGrad.addColorStop(0, 'rgba(212, 175, 55, 0.7)'); bGrad.addColorStop(1, 'rgba(212, 175, 55, 0.1)');
+        ctx.strokeStyle = bGrad; ctx.lineWidth = 1.5; ctx.stroke();
         
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; ctx.beginPath(); ctx.roundRect(x+3, y+3, w-6, h-6, 9); ctx.stroke();
+        // 內圈裝飾線
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'; ctx.beginPath(); ctx.roundRect(x+4, y+4, w-8, h-8, 5); ctx.stroke();
+        
+        // 角落金屬裝飾
+        ctx.fillStyle = 'rgba(212, 175, 55, 0.6)';
+        ctx.fillRect(x+6, y+6, 15, 2); ctx.fillRect(x+6, y+6, 2, 15);
+        ctx.fillRect(x+w-21, y+6, 15, 2); ctx.fillRect(x+w-8, y+6, 2, 15);
+        ctx.fillRect(x+6, y+h-8, 15, 2); ctx.fillRect(x+6, y+h-21, 2, 15);
+        ctx.fillRect(x+w-21, y+h-8, 15, 2); ctx.fillRect(x+w-8, y+h-21, 2, 15);
         ctx.restore();
     }
 
     function wrapText(ctx, text, maxWidth) {
-        let words = text.split('');
-        let lines = []; let currentLine = '';
+        let words = text.split(''); let lines = []; let currentLine = '';
         for (let i = 0; i < words.length; i++) {
             let char = words[i];
             if (char === '\n') { lines.push(currentLine); currentLine = ''; continue; }
             let testLine = currentLine + char;
             let metrics = ctx.measureText(testLine);
-            if (metrics.width > maxWidth && currentLine !== '') {
-                lines.push(currentLine); currentLine = char;
-            } else { currentLine = testLine; }
+            if (metrics.width > maxWidth && currentLine !== '') { lines.push(currentLine); currentLine = char; } 
+            else { currentLine = testLine; }
         }
         if (currentLine) lines.push(currentLine);
         return lines;
     }
 
     function drawDatePanel(ctx) {
-        let panelW = 260; let panelH = 100;
-        drawGlassPanel(ctx, 20, 20, panelW, panelH);
+        if(isCinematic) return;
+        drawPremiumPanel(ctx, 20, 20, 280, 110);
+        ctx.save(); ctx.beginPath(); ctx.arc(75, 75, 36, 0, Math.PI * 2); ctx.clip();
+        ctx.fillStyle = '#10151a'; ctx.fill(); mainCharacter.draw(ctx, 75, 95, 0.45, true); ctx.restore();
+        ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(75, 75, 36, 0, Math.PI*2); ctx.stroke();
         
-        ctx.save();
-        ctx.beginPath(); ctx.arc(65, 70, 32, 0, Math.PI * 2); ctx.clip();
-        ctx.fillStyle = '#121826'; ctx.fill();
-        mainCharacter.draw(ctx, 65, 90, 0.4, true); 
-        ctx.restore();
-        
-        ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 2; 
-        ctx.beginPath(); ctx.arc(65, 70, 32, 0, Math.PI*2); ctx.stroke();
-
         ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
-        ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.textAlign = 'left'; 
-        ctx.fillText(`【大宋宣和元年】`, 110, 55);
-        ctx.fillStyle = '#e0e0e0'; ctx.font = `18px ${FONT_FAMILY}`; 
-        
-        // 動態顯示當前場景名稱
-        let locText = "";
-        if(currentDay >= 1 && currentDay <= 7) locText = daysData[currentDay-1].location;
-        ctx.fillText(`第${currentDay}天 ‧ ${locText}`, 120, 85);
-        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#d4af37'; ctx.font = `bold 22px ${FONT_FAMILY}`; ctx.textAlign = 'left'; 
+        ctx.fillText(`大宋宣和元年`, 125, 55);
+        ctx.fillStyle = '#eaeaea'; ctx.font = `18px ${FONT_FAMILY}`; 
+        let loc = currentDay >= 1 && currentDay <= 7 ? daysData[currentDay-1].location : "侯府";
+        ctx.fillText(`第${currentDay}日 ‧ ${loc}`, 125, 85); ctx.shadowBlur = 0;
     }
 
     function drawStatsPanel(ctx) {
-        let panelW = 340; let panelX = Math.max(20, cw - panelW - 20);
-        let panelY = 20; let panelH = 480; 
-        drawGlassPanel(ctx, panelX, panelY, panelW, panelH);
+        if(isCinematic) return;
+        let pW = 340; let pX = Math.max(20, cw - pW - 20); let pY = 20; let pH = 490; 
+        drawPremiumPanel(ctx, pX, pY, pW, pH);
         
         ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
         ctx.fillStyle = '#d4af37'; ctx.font = `bold 22px ${FONT_FAMILY}`; ctx.textAlign = 'left';
-        ctx.fillText("【主母狀態】", panelX + 20, panelY + 35); ctx.shadowBlur = 0;
+        ctx.fillText("◇ 府邸記要 ◇", pX + 20, pY + 35); ctx.shadowBlur = 0;
 
         let drawBar = (label, val, yOffset, color) => {
-            ctx.fillStyle = '#fff'; ctx.font = `18px ${FONT_FAMILY}`; ctx.textAlign = 'left';
-            ctx.fillText(label, panelX + 20, panelY + yOffset);
-            ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.roundRect(panelX + 70, panelY + yOffset - 13, panelW - 90, 12, 6); ctx.fill();
-            ctx.fillStyle = color;
-            ctx.beginPath(); ctx.roundRect(panelX + 70, panelY + yOffset - 13, (val / 100) * (panelW - 90), 12, 6); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = `18px ${FONT_FAMILY}`; ctx.textAlign = 'left'; ctx.fillText(label, pX + 20, pY + yOffset);
+            ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.beginPath(); ctx.roundRect(pX + 70, pY + yOffset - 14, pW - 90, 14, 7); ctx.fill();
+            ctx.fillStyle = color; ctx.beginPath(); ctx.roundRect(pX + 70, pY + yOffset - 14, (val / 100) * (pW - 90), 14, 7); ctx.fill();
         };
 
-        drawBar("智慧", player.knowledge, 65, player.knowledge > 30 ? '#4caf50' : '#e74c3c');
-        drawBar("體力", player.health, 95, player.health > 30 ? '#e86f88' : '#e74c3c');
-        drawBar("聲望", player.reputation, 125, player.reputation > 30 ? '#f39c12' : '#e74c3c');
-        drawBar("羈絆", player.bond, 155, player.bond > 30 ? '#82c0d9' : '#e74c3c');
+        drawBar("慧心", player.knowledge, 70, player.knowledge > 30 ? '#27ae60' : '#c0392b');
+        drawBar("元氣", player.health, 100, player.health > 30 ? '#d35400' : '#c0392b');
+        drawBar("清譽", player.reputation, 130, player.reputation > 30 ? '#f39c12' : '#c0392b');
+        drawBar("羈絆", player.bond, 160, player.bond > 30 ? '#2980b9' : '#c0392b');
 
-        ctx.fillStyle = '#d4af37'; ctx.font = `bold 18px ${FONT_FAMILY}`;
-        ctx.fillText("【主母作風】", panelX + 20, panelY + 195);
-        ctx.fillStyle = '#e0e0e0'; ctx.font = `15px ${FONT_FAMILY}`;
-        let routeTxt = `賢德: ${player.routes.virtue} | 權謀: ${player.routes.power} | 醫術: ${player.routes.medical} | 親情: ${player.routes.family}`;
-        ctx.fillText(routeTxt, panelX + 20, panelY + 220);
+        ctx.fillStyle = '#d4af37'; ctx.font = `bold 18px ${FONT_FAMILY}`; ctx.fillText("作風傾向", pX + 20, pY + 200);
+        ctx.fillStyle = '#ccc'; ctx.font = `15px ${FONT_FAMILY}`;
+        ctx.fillText(`賢德: ${player.routes.virtue} | 權謀: ${player.routes.power} | 醫理: ${player.routes.medical} | 親情: ${player.routes.family}`, pX + 20, pY + 225);
 
-        ctx.strokeStyle = 'rgba(212, 175, 55, 0.3)'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(panelX + 10, panelY + 240); ctx.lineTo(panelX + panelW - 10, panelY + 240); ctx.stroke();
+        ctx.strokeStyle = 'rgba(212, 175, 55, 0.2)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pX + 15, pY + 245); ctx.lineTo(pX + pW - 15, pY + 245); ctx.stroke();
 
-        ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`;
-        ctx.fillText("【後宅關係】", panelX + 20, panelY + 270);
+        ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.fillText("後宅人心", pX + 20, pY + 275);
 
-        let startY = panelY + 310;
+        let startY = pY + 315;
         for (const key in player.affections) {
-            let stat = player.affections[key];
-            stat.current += (stat.target - stat.current) * 10 * dt;
-            
-            let statusColor = '#e0e0e0';
-            if(stat.target <= 20) statusColor = '#e74c3c'; 
-            else if(['嫌隙', '心寒', '厭惡', '覺得荒唐', '心灰意冷', '瑟瑟發抖', '氣急敗壞', '慌張', '恐懼', '強烈厭惡', '疑惑', '擔憂'].includes(stat.status)) statusColor = '#e74c3c';
-            else if(['崇拜', '崇敬', '死心塌地', '情同姐妹', '醫者父母心', '敬畏', '知音', '安心', '欣慰', '敬佩', '★特殊羈絆'].includes(stat.status)) statusColor = '#4caf50';
-
+            let stat = player.affections[key]; stat.current += (stat.target - stat.current) * 10 * dt;
+            let statusColor = stat.target >= 90 ? '#f1c40f' : (stat.target >= 60 ? '#2ecc71' : (stat.target >= 30 ? '#3498db' : '#e74c3c'));
             let npc = npcs[key];
             if (npc) {
-                let imgExpr = (statusColor === '#e74c3c') ? 'angry' : ((statusColor === '#4caf50') ? 'happy' : 'normal');
-                npc.setEmotion(imgExpr);
-                ctx.save();
-                ctx.beginPath(); ctx.arc(panelX + 45, startY - 5, 22, 0, Math.PI * 2); ctx.clip();
-                ctx.fillStyle = '#1a1f2e'; ctx.fill();
-                npc.draw(ctx, panelX + 45, startY + 10, 0.3, true);
-                ctx.restore();
-                ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 1.5;
-                ctx.beginPath(); ctx.arc(panelX + 45, startY - 5, 22, 0, Math.PI*2); ctx.stroke();
+                npc.setEmotion(stat.target >= 60 ? 'happy' : (stat.target <= 20 ? 'angry' : 'normal'));
+                ctx.save(); ctx.beginPath(); ctx.arc(pX + 45, startY - 5, 22, 0, Math.PI * 2); ctx.clip();
+                ctx.fillStyle = '#141820'; ctx.fill(); npc.draw(ctx, pX + 45, startY + 10, 0.3, true); ctx.restore();
+                ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(pX + 45, startY - 5, 22, 0, Math.PI*2); ctx.stroke();
             }
-
-            ctx.fillStyle = '#fff'; ctx.font = `16px ${FONT_FAMILY}`; ctx.textAlign = 'left'; 
-            ctx.fillText(`${stat.name}`, panelX + 75, startY - 10);
-            ctx.fillStyle = statusColor; ctx.textAlign = 'right'; ctx.font = `14px ${FONT_FAMILY}`; 
-            ctx.fillText(`[${stat.status}]`, panelX + panelW - 20, startY - 10);
-            
-            ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.roundRect(panelX + 75, startY + 5, panelW - 95, 6, 3); ctx.fill();
-            ctx.fillStyle = stat.color; 
-            let barWidth = Math.max(0, (stat.current / stat.max) * (panelW - 95));
-            ctx.beginPath(); ctx.roundRect(panelX + 75, startY + 5, barWidth, 6, 3); ctx.fill(); 
-            ctx.shadowColor = stat.color; ctx.shadowBlur = 8; ctx.beginPath(); ctx.roundRect(panelX + 75, startY + 5, barWidth, 6, 3); ctx.fill(); ctx.shadowBlur = 0;
-            startY += 40;
+            ctx.fillStyle = '#fff'; ctx.font = `16px ${FONT_FAMILY}`; ctx.textAlign = 'left'; ctx.fillText(`${stat.name}`, pX + 75, startY - 10);
+            ctx.fillStyle = statusColor; ctx.textAlign = 'right'; ctx.font = `14px ${FONT_FAMILY}`; ctx.fillText(`[${stat.status}]`, pX + pW - 20, startY - 10);
+            ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.beginPath(); ctx.roundRect(pX + 75, startY + 5, pW - 95, 6, 3); ctx.fill();
+            ctx.fillStyle = stat.color; ctx.beginPath(); ctx.roundRect(pX + 75, startY + 5, Math.max(0, (stat.current / stat.max) * (pW - 95)), 6, 3); ctx.fill(); 
+            startY += 42;
         }
     }
 
     function drawButton(ctx, id, btn, text) {
         let hover = (mouse.x >= btn.x && mouse.x <= btn.x + btn.w && mouse.y >= btn.y && mouse.y <= btn.y + btn.h);
-        let scale = 1;
-        if (hover) { scale = mouse.isDown ? 0.95 : 1.02; canvas.style.cursor = 'pointer'; }
+        let scale = hover ? (mouse.isDown ? 0.96 : 1.01) : 1;
+        if (hover) canvas.style.cursor = 'pointer';
 
-        ctx.save();
-        ctx.translate(btn.x + btn.w/2, btn.y + btn.h/2);
-        ctx.scale(scale, scale);
-        
+        ctx.save(); ctx.translate(btn.x + btn.w/2, btn.y + btn.h/2); ctx.scale(scale, scale);
         let bgGrad = ctx.createLinearGradient(0, -btn.h/2, 0, btn.h/2);
         if (hover) {
-            bgGrad.addColorStop(0, 'rgba(212, 175, 55, 0.4)'); bgGrad.addColorStop(1, 'rgba(150, 110, 20, 0.2)');
-            ctx.shadowColor = 'rgba(212, 175, 55, 0.6)'; ctx.shadowBlur = 15; 
+            bgGrad.addColorStop(0, 'rgba(212, 175, 55, 0.5)'); bgGrad.addColorStop(1, 'rgba(150, 110, 20, 0.3)');
+            ctx.shadowColor = 'rgba(212, 175, 55, 0.5)'; ctx.shadowBlur = 10; 
         } else {
-            bgGrad.addColorStop(0, 'rgba(30, 35, 45, 0.9)'); bgGrad.addColorStop(1, 'rgba(15, 18, 25, 0.9)');
+            bgGrad.addColorStop(0, 'rgba(30, 35, 45, 0.95)'); bgGrad.addColorStop(1, 'rgba(15, 18, 25, 0.95)');
         }
-        ctx.fillStyle = bgGrad; ctx.beginPath(); ctx.roundRect(-btn.w/2, -btn.h/2, btn.w, btn.h, 8); ctx.fill();
-        ctx.strokeStyle = hover ? '#fff' : '#d4af37'; ctx.lineWidth = hover ? 2 : 1; ctx.stroke();
+        ctx.fillStyle = bgGrad; ctx.beginPath(); ctx.roundRect(-btn.w/2, -btn.h/2, btn.w, btn.h, 4); ctx.fill();
+        ctx.strokeStyle = hover ? '#fff' : '#8e793e'; ctx.lineWidth = hover ? 1.5 : 1; ctx.stroke();
         
         ctx.fillStyle = hover ? '#fff' : '#d4af37'; ctx.font = `20px ${FONT_FAMILY}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        
-        let lines = wrapText(ctx, text, btn.w - 30);
+        let lines = wrapText(ctx, text, btn.w - 20);
         let startY = -((lines.length - 1) * 12);
         lines.forEach((l, i) => { ctx.fillText(l, 0, startY + i * 24); });
         ctx.restore();
-        
-        clickZones.push({ id: id, x: btn.x, y: btn.y, w: btn.w, h: btn.h });
+        clickZones.push({ id: id, ...btn });
     }
 
     function renderDialog(ctx, titleText, contentText, options = null) {
-        let padding = 30;
-        let boxW = Math.min(800, cw - 40);
-        let boxX = cw / 2 - boxW / 2;
-
+        let padding = 35; let boxW = Math.min(850, cw - 40); let boxX = cw / 2 - boxW / 2;
         ctx.font = `22px ${FONT_FAMILY}`;
         let contentLines = wrapText(ctx, contentText, boxW - padding * 2);
-        let contentH = contentLines.length * 34;
-
+        let contentH = contentLines.length * 36;
         let btnHs = []; let totalBtnH = 0;
+
         if (options) {
             ctx.font = `20px ${FONT_FAMILY}`;
             btnHs = options.map(opt => wrapText(ctx, opt.text, boxW - padding * 2 - 30).length * 24 + 30);
             totalBtnH = btnHs.reduce((a,b)=>a+b, 0) + (options.length) * 15;
         }
 
-        let boxH = padding * 2 + contentH + (options ? totalBtnH + 10 : 30);
-        let boxY = ch - boxH - 20;
+        let boxH = padding * 2 + contentH + (options ? totalBtnH + 15 : 35);
+        let boxY = ch - boxH - (isCinematic ? 60 : 30);
 
-        drawGlassPanel(ctx, boxX, boxY, boxW, boxH);
+        drawPremiumPanel(ctx, boxX, boxY, boxW, boxH);
 
         if (titleText) {
-            ctx.save();
-            ctx.font = `bold 22px ${FONT_FAMILY}`;
-            let titleW = ctx.measureText(titleText).width + 50;
-            let titleH = 40; let titleX = boxX + 20; let titleY = boxY - titleH / 2; 
-            ctx.fillStyle = 'rgba(212, 175, 55, 0.95)'; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 6;
-            ctx.beginPath(); ctx.roundRect(titleX, titleY, titleW, titleH, 6); ctx.fill();
-            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
-            ctx.shadowBlur = 0; ctx.fillStyle = '#05070a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(titleText, titleX + titleW / 2, titleY + titleH / 2);
+            ctx.save(); ctx.font = `bold 24px ${FONT_FAMILY}`;
+            let tW = ctx.measureText(titleText).width + 60; let tH = 44; let tX = boxX + 25; let tY = boxY - tH / 2; 
+            let tGrad = ctx.createLinearGradient(tX, tY, tX, tY+tH);
+            tGrad.addColorStop(0, '#d4af37'); tGrad.addColorStop(1, '#9a7b21');
+            ctx.fillStyle = tGrad; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 8;
+            ctx.beginPath(); ctx.roundRect(tX, tY, tW, tH, 4); ctx.fill();
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.shadowBlur = 0; ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(titleText, tX + tW / 2, tY + tH / 2);
             ctx.restore();
         }
 
         ctx.font = `22px ${FONT_FAMILY}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-        ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
-        
+        ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 3;
         let currY = boxY + padding;
         contentLines.forEach(line => {
-            if(line.includes("【調養小記】") || line.includes("【序章") || line.includes("【系統】")) ctx.fillStyle = '#f39c12';
-            else ctx.fillStyle = '#f0f0f0';
+            ctx.fillStyle = (line.includes("【") || line.includes("】")) ? '#d4af37' : '#f0f0f0';
             ctx.fillText(line, boxX + padding, currY);
-            currY += 34;
+            currY += 36;
         });
         ctx.shadowBlur = 0;
 
         if (options) {
-            currY += 10;
-            let btnW = boxW - padding * 2; let btnX = boxX + padding;
+            currY += 15; let btnW = boxW - padding * 2; let btnX = boxX + padding;
             options.forEach((opt, idx) => {
                 let h = btnHs[idx];
                 drawButton(ctx, `opt_${idx}`, {x: btnX, y: currY, w: btnW, h: h}, opt.text);
                 currY += h + 15;
             });
         } else {
-            ctx.globalAlpha = (Math.sin(time * 5) + 1) * 0.5;
+            ctx.globalAlpha = (Math.sin(time * 4) + 1) * 0.5;
             ctx.fillStyle = '#d4af37'; ctx.textAlign = 'right'; ctx.font = `bold 18px ${FONT_FAMILY}`; ctx.textBaseline = 'bottom';
-            ctx.fillText("▼ 點擊繼續", boxX + boxW - 20, boxY + boxH - 15);
+            ctx.fillText("◇ 點擊繼續 ◇", boxX + boxW - 25, boxY + boxH - 20);
             ctx.globalAlpha = 1.0;
             clickZones.push({ id: 'screen_next', x: 0, y: 0, w: cw, h: ch });
         }
     }
 
+    // --- 高階古風場景渲染 ---
     function drawSceneBackground(ctx) {
-        // 動態判定當前場景
-        let loc = "華麗正房";
-        if (currentState === STATES.START) loc = "侯府正廳";
-        else if (currentStage && currentStage.location) loc = currentStage.location;
-        else if (currentDay >= 1 && currentDay <= 7) loc = daysData[currentDay - 1].location;
+        let loc = "侯府臥房"; let weather = "sunny";
+        if (currentState === STATES.START) { loc = "侯府正廳"; }
+        else if (currentStage && currentStage.location) { loc = currentStage.location; }
+        else if (currentDay >= 1 && currentDay <= 7) { loc = daysData[currentDay - 1].location; weather = daysData[currentDay - 1].weather; }
 
         let grad = ctx.createLinearGradient(0, 0, 0, ch);
         
-        if (loc.includes('正房') || loc.includes('臥房')) {
-            grad.addColorStop(0, '#2a1a1f'); grad.addColorStop(1, '#1a0a0f');
+        // 渲染基礎環境光
+        if (loc.includes('臥房') || loc.includes('正房')) {
+            grad.addColorStop(0, '#2b1d22'); grad.addColorStop(1, '#1a1114'); // 暖紫檀木色
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
-            ctx.fillStyle = 'rgba(212, 175, 55, 0.03)';
-            ctx.fillRect(cw*0.1, ch*0.2, cw*0.3, ch*0.6); ctx.fillRect(cw*0.6, ch*0.2, cw*0.3, ch*0.6);
-            ctx.strokeStyle = 'rgba(212, 175, 55, 0.1)'; ctx.lineWidth = 4;
-            ctx.strokeRect(cw*0.1, ch*0.2, cw*0.3, ch*0.6); ctx.strokeRect(cw*0.6, ch*0.2, cw*0.3, ch*0.6);
+            // 古風屏風/窗櫺剪影
+            ctx.fillStyle = 'rgba(212, 175, 55, 0.02)';
+            ctx.fillRect(cw*0.05, ch*0.1, cw*0.25, ch*0.8); ctx.fillRect(cw*0.7, ch*0.1, cw*0.25, ch*0.8);
+            ctx.strokeStyle = 'rgba(212, 175, 55, 0.08)'; ctx.lineWidth = 2;
+            for(let i=0; i<10; i++) {
+                ctx.strokeRect(cw*0.05, ch*0.1 + i*ch*0.08, cw*0.25, ch*0.08);
+                ctx.strokeRect(cw*0.7, ch*0.1 + i*ch*0.08, cw*0.25, ch*0.08);
+            }
         } else if (loc.includes('庭院') || loc.includes('花園')) {
-            grad.addColorStop(0, '#101820'); grad.addColorStop(1, '#1a2b3c');
+            grad.addColorStop(0, '#1c2833'); grad.addColorStop(1, '#111822'); // 青黛色
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
-            ctx.fillStyle = 'rgba(255, 255, 220, 0.8)'; ctx.shadowColor = '#ffefa0'; ctx.shadowBlur = 50;
-            ctx.beginPath(); ctx.arc(cw*0.8, ch*0.2, Math.min(cw,ch)*0.1, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
-            ctx.fillStyle = '#0a1015';
-            ctx.beginPath(); ctx.moveTo(0, ch); ctx.lineTo(0, ch*0.6);
-            ctx.quadraticCurveTo(cw*0.3, ch*0.4, cw*0.6, ch*0.7); ctx.quadraticCurveTo(cw*0.8, ch*0.6, cw, ch*0.8);
-            ctx.lineTo(cw, ch); ctx.fill();
-        } else if (loc.includes('廚房') || loc.includes('膳房')) {
-            grad.addColorStop(0, '#1a1005'); grad.addColorStop(1, '#2a1005');
+            // 朦朧遠月/日光
+            ctx.fillStyle = weather==='sunny' ? 'rgba(255, 240, 200, 0.6)' : 'rgba(200, 220, 255, 0.4)';
+            ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 80;
+            ctx.beginPath(); ctx.arc(cw*0.8, ch*0.3, Math.min(cw,ch)*0.15, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+            // 竹影婆娑
+            ctx.fillStyle = '#0a0f14';
+            ctx.beginPath(); ctx.moveTo(0, ch); ctx.lineTo(0, ch*0.5); ctx.quadraticCurveTo(cw*0.3, ch*0.3, cw*0.6, ch*0.8); 
+            ctx.quadraticCurveTo(cw*0.8, ch*0.6, cw, ch*0.9); ctx.lineTo(cw, ch); ctx.fill();
+        } else if (loc.includes('膳房') || loc.includes('廚房')) {
+            grad.addColorStop(0, '#2a1a10'); grad.addColorStop(1, '#150d05'); // 赭石色
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
-            let fire = ctx.createRadialGradient(cw/2, ch, 0, cw/2, ch, ch*0.8);
-            fire.addColorStop(0, 'rgba(255, 100, 0, 0.15)'); fire.addColorStop(1, 'rgba(0,0,0,0)');
+            // 爐火暖光
+            let fire = ctx.createRadialGradient(cw*0.5, ch, 0, cw*0.5, ch, ch*0.9);
+            fire.addColorStop(0, 'rgba(230, 80, 20, 0.2)'); fire.addColorStop(1, 'rgba(0,0,0,0)');
             ctx.fillStyle = fire; ctx.fillRect(0, 0, cw, ch);
         } else if (loc.includes('太醫院') || loc.includes('書閣')) {
-            grad.addColorStop(0, '#10151a'); grad.addColorStop(1, '#0a0d14');
+            grad.addColorStop(0, '#152020'); grad.addColorStop(1, '#0a1010'); // 玄青色
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            for(let i=0; i<5; i++) { ctx.fillRect(0, ch*0.2 + i*ch*0.15, cw, ch*0.02); }
+            // 藥櫃線條
+            ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 3;
+            for(let i=0; i<8; i++) {
+                for(let j=0; j<15; j++) { ctx.strokeRect(cw*0.1 + j*cw*0.05, ch*0.2 + i*ch*0.08, cw*0.05, ch*0.08); }
+            }
         } else if (loc.includes('夜晚')) {
-            grad.addColorStop(0, '#020510'); grad.addColorStop(1, '#0a0f1c');
+            grad.addColorStop(0, '#0a0d1a'); grad.addColorStop(1, '#05070d'); // 幽夜藍
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'; ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 30;
-            ctx.beginPath(); ctx.arc(cw*0.2, ch*0.2, Math.min(cw,ch)*0.08, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+            // 冷月光
+            ctx.fillStyle = 'rgba(180, 200, 255, 0.5)'; ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 60;
+            ctx.beginPath(); ctx.arc(cw*0.2, ch*0.2, Math.min(cw,ch)*0.1, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
         } else {
-            grad.addColorStop(0, '#151b29'); grad.addColorStop(1, '#05070a');
+            grad.addColorStop(0, '#1a1a24'); grad.addColorStop(1, '#08080c');
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
         }
+
+        // 渲染環境粒子
+        if (particles.length === 0 || Math.random() < 0.01) updateWeather(weather);
+        ctx.globalCompositeOperation = 'screen';
+        particles.forEach(p => { p.update(dt); p.draw(ctx); });
+        ctx.globalCompositeOperation = 'source-over';
     }
 
+    // --- 主遊戲迴圈 ---
     function gameLoop(timestamp) {
         if (!timestamp) timestamp = performance.now();
         if (!lastTime) lastTime = timestamp;
         dt = (timestamp - lastTime) / 1000 || 0;
         if (dt > 0.1) dt = 0.016; 
-        lastTime = timestamp; 
-        time += dt;
+        lastTime = timestamp; time += dt;
         if (isNaN(time)) time = 0;
 
         mouse.x += (mouse.targetX - mouse.x) * 10 * dt; mouse.y += (mouse.targetY - mouse.y) * 10 * dt;
+        
+        // 攝影機震動
         if (cameraShake.amount > 0.1) {
             cameraShake.x = (Math.random() - 0.5) * cameraShake.amount; cameraShake.y = (Math.random() - 0.5) * cameraShake.amount;
-            cameraShake.amount *= 0.9;
+            cameraShake.amount *= 0.85;
         } else { cameraShake.x = 0; cameraShake.y = 0; }
+
+        // CG 模式平滑過渡
+        cinematicLerp += ((isCinematic ? 1 : 0) - cinematicLerp) * dt * 3;
 
         ctx.save();
         ctx.scale(dpr, dpr); 
         ctx.translate(cameraShake.x, cameraShake.y);
 
+        // 狀態轉場漸變
         if (currentState === STATES.DAY_TRANSITION || currentState === STATES.START || currentState === STATES.END || currentState === STATES.LOADING) {
             globalAlpha += (1 - globalAlpha) * dt * 2;
-        } else {
-            globalAlpha = 1;
-        }
-        if (isNaN(globalAlpha)) globalAlpha = 1;
-        ctx.globalAlpha = globalAlpha;
+        } else { globalAlpha = 1; }
+        ctx.globalAlpha = isNaN(globalAlpha) ? 1 : globalAlpha;
 
         drawSceneBackground(ctx);
 
-        ctx.globalCompositeOperation = 'screen';
-        dustParticles.forEach(p => { p.update(dt); p.draw(ctx); });
-        ctx.globalCompositeOperation = 'source-over';
-
+        // 角色更新與渲染
         mainCharacter.update(dt);
         Object.values(npcs).forEach(npc => npc.update(dt));
         
-        let activeCharacter = mainCharacter;
+        let activeChar = mainCharacter;
         if (currentState !== STATES.LOADING) {
             if (currentState === STATES.STORY || currentState === STATES.QUESTION || currentState === STATES.FEEDBACK) {
-                let stage = currentStage || introStage;
-                let charName = stage.character || "";
-                if (charName.includes("春桃") || charName.includes("丫鬟")) activeCharacter = npcs.maid;
-                else if (charName.includes("總管") || charName.includes("管事")) activeCharacter = npcs.chef;
-                else if (charName.includes("張大人") || charName.includes("太醫")) activeCharacter = npcs.doctor;
-                else if (charName.includes("蘇氏") || charName.includes("醫女")) activeCharacter = npcs.medic;
-                else activeCharacter = mainCharacter;
-            } else {
-                activeCharacter = mainCharacter;
+                let stage = currentStage || introStage; let charName = stage.character || "";
+                if (charName.includes("春桃")) activeChar = npcs.maid;
+                else if (charName.includes("總管")) activeChar = npcs.chef;
+                else if (charName.includes("太醫") || charName.includes("張")) activeChar = npcs.doctor;
+                else if (charName.includes("蘇氏") || charName.includes("醫女")) activeChar = npcs.medic;
             }
-
             if (currentState !== STATES.DAY_TRANSITION && currentState !== STATES.START && currentState !== STATES.END && currentState !== STATES.LOADING) {
-                let charScale = Math.max(1.0, Math.min(cw/600, ch/800) * 2.2);
-                activeCharacter.draw(ctx, cw/2, ch/2 + 100, charScale);
+                // CG 模式下拉近鏡頭
+                let charScale = Math.max(1.0, Math.min(cw/600, ch/800) * 2.2) + (cinematicLerp * 0.8);
+                let charY = ch/2 + 100 + (cinematicLerp * 150);
+                activeChar.draw(ctx, cw/2, charY, charScale);
             }
+        }
+
+        // 繪製電影級黑邊 (CG 模式)
+        if (cinematicLerp > 0.01) {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, cw, ch * 0.12 * cinematicLerp); // 上黑邊
+            ctx.fillRect(0, ch - (ch * 0.12 * cinematicLerp), cw, ch * 0.12 * cinematicLerp); // 下黑邊
+            // 強光濾鏡
+            ctx.globalCompositeOperation = 'screen';
+            ctx.fillStyle = `rgba(255, 230, 180, ${cinematicLerp * 0.15})`;
+            ctx.fillRect(0,0,cw,ch);
+            ctx.globalCompositeOperation = 'source-over';
         }
 
         clickZones = [];
         canvas.style.cursor = 'crosshair'; 
 
+        // 狀態 UI 渲染
         if (currentState === STATES.LOADING) {
-             ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0,0,cw,ch);
-             ctx.textAlign = 'center'; ctx.fillStyle = '#d4af37'; ctx.font = `bold 30px ${FONT_FAMILY}`; 
-             ctx.fillText("載入題庫中...", cw/2, ch/2);
+             ctx.fillStyle = 'rgba(0,0,0,0.9)'; ctx.fillRect(0,0,cw,ch);
+             ctx.textAlign = 'center'; ctx.fillStyle = '#d4af37'; ctx.font = `bold 28px ${FONT_FAMILY}`; 
+             ctx.fillText("研讀卷宗中...", cw/2, ch/2);
         }
         else if (currentState === STATES.START) {
-            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,cw,ch);
-            ctx.textAlign = 'center'; ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 20;
-            ctx.fillStyle = '#fff'; 
-            let titleSize = Math.max(30, Math.min(60, cw * 0.08));
-            ctx.font = `bold ${titleSize}px ${FONT_FAMILY}`; ctx.fillText("汴京娘子調養記", cw/2, ch/2 - 100); ctx.shadowBlur = 0;
-            ctx.fillStyle = '#d4af37'; ctx.font = `${titleSize*0.45}px ${FONT_FAMILY}`; ctx.fillText("— 劇情沉浸版 —", cw/2, ch/2 - 40);
-            drawButton(ctx, 'btn_start', {x: cw/2 - 100, y: ch/2 + 80, w: 200, h: 60}, "進入侯府");
+            ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0,0,cw,ch);
+            ctx.textAlign = 'center'; ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 30;
+            ctx.fillStyle = '#fff'; let titleSize = Math.max(35, Math.min(70, cw * 0.08));
+            ctx.font = `bold ${titleSize}px ${FONT_FAMILY}`; ctx.fillText("汴京娘子調養記", cw/2, ch/2 - 110); ctx.shadowBlur = 0;
+            ctx.fillStyle = '#d4af37'; ctx.font = `${titleSize*0.4}px ${FONT_FAMILY}`; ctx.fillText("◇ 沉浸式人生養成 ◇", cw/2, ch/2 - 40);
+            drawButton(ctx, 'btn_start', {x: cw/2 - 110, y: ch/2 + 80, w: 220, h: 65}, "踏入侯府");
         }
         else if (currentState === STATES.DAY_TRANSITION) {
-            ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0,0,cw,ch);
+            ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0,0,cw,ch);
             let dayInfo = daysData[Math.min(currentDay - 1, daysData.length - 1)];
-            
-            ctx.textAlign = 'center';
-            ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 15;
-            ctx.fillStyle = '#d4af37'; ctx.font = `bold 46px ${FONT_FAMILY}`; 
-            ctx.fillText(`產後第 ${currentDay} 天`, cw/2, ch/2 - 80); ctx.shadowBlur = 0;
-            
+            ctx.textAlign = 'center'; ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 15;
+            ctx.fillStyle = '#d4af37'; ctx.font = `bold 48px ${FONT_FAMILY}`; 
+            ctx.fillText(dayInfo.day, cw/2, ch/2 - 80); ctx.shadowBlur = 0;
             ctx.fillStyle = '#e0e0e0'; ctx.font = `24px ${FONT_FAMILY}`;
-            let lines = wrapText(ctx, dayInfo.event, Math.min(600, cw - 60));
-            lines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 10 + i*34));
-            
-            ctx.globalAlpha = (Math.sin(time * 5) + 1) * 0.5 * globalAlpha;
-            ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; 
-            ctx.fillText("▼ 點擊開啟今日日程 ▼", cw/2, ch/2 + 150);
+            let lines = wrapText(ctx, dayInfo.event, Math.min(650, cw - 60));
+            lines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 10 + i*38));
+            ctx.globalAlpha = (Math.sin(time * 3) + 1) * 0.5 * globalAlpha;
+            ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.fillText("◇ 點擊開啟今日日程 ◇", cw/2, ch/2 + 150);
             ctx.globalAlpha = globalAlpha;
             clickZones.push({ id: 'screen_next_day', x: 0, y: 0, w: cw, h: ch });
         }
         else if (currentState === STATES.STORY) {
             drawDatePanel(ctx); drawStatsPanel(ctx);
-            let stage = currentStage;
-            renderDialog(ctx, stage.character, stage.story[currentStoryLine], null);
+            renderDialog(ctx, currentStage.character, currentStage.story[currentStoryLine], null);
         }
         else if (currentState === STATES.QUESTION) {
             drawDatePanel(ctx); drawStatsPanel(ctx);
-            let stage = currentStage;
-            renderDialog(ctx, stage.character || "請夫人定奪", stage.question, stage.options);
+            renderDialog(ctx, currentStage.character || "內心抉擇", currentStage.question, currentStage.options);
         }
         else if (currentState === STATES.FEEDBACK) {
             drawDatePanel(ctx); drawStatsPanel(ctx);
-            renderDialog(ctx, "選擇結果", selectedOptionFeedback, null);
+            renderDialog(ctx, "選擇之果", selectedOptionFeedback, null);
         }
         else if (currentState === STATES.END) {
-            ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0,0,cw,ch);
+            ctx.fillStyle = 'rgba(0,0,0,0.9)'; ctx.fillRect(0,0,cw,ch);
             ctx.textAlign = 'center'; 
-            
-            ctx.fillStyle = currentEnding.color; ctx.font = `bold 46px ${FONT_FAMILY}`; 
-            ctx.fillText(currentEnding.title, cw/2, ch/2 - 120);
-            
-            ctx.fillStyle = '#fff'; ctx.font = `22px ${FONT_FAMILY}`; 
-            let endLines = wrapText(ctx, currentEnding.desc, Math.min(700, cw - 60));
+            ctx.fillStyle = currentEnding.color; ctx.font = `bold 52px ${FONT_FAMILY}`; ctx.fillText(currentEnding.title, cw/2, ch/2 - 130);
+            ctx.fillStyle = '#eaeaea'; ctx.font = `24px ${FONT_FAMILY}`; 
+            let endLines = wrapText(ctx, currentEnding.desc, Math.min(750, cw - 60));
             endLines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 40 + i*40));
-
-            drawButton(ctx, 'btn_restart', {x: cw/2 - 220, y: ch/2 + 120, w: 200, h: 60}, "再次體驗七日人生");
-            drawButton(ctx, 'btn_home', {x: cw/2 + 20, y: ch/2 + 120, w: 200, h: 60}, "回到首頁");
+            
+            drawButton(ctx, 'btn_restart', {x: cw/2 - 240, y: ch/2 + 130, w: 220, h: 65}, "重啟人生");
+            drawButton(ctx, 'btn_home', {x: cw/2 + 20, y: ch/2 + 130, w: 220, h: 65}, "返回首頁");
         }
 
         floatingTexts = floatingTexts.filter(t => t.life > 0); floatingTexts.forEach(t => { t.update(); t.draw(ctx); });
 
         if (bloomIntensity > 0) {
-            ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = `rgba(${bloomColor}, ${bloomIntensity * 0.4})`;
-            ctx.fillRect(0, 0, cw, ch); bloomIntensity -= dt * 2; ctx.globalCompositeOperation = 'source-over';
+            ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = `rgba(${bloomColor}, ${bloomIntensity * 0.35})`;
+            ctx.fillRect(0, 0, cw, ch); bloomIntensity -= dt * 2.5; ctx.globalCompositeOperation = 'source-over';
         }
 
         ctx.restore();
@@ -1139,90 +902,46 @@
         
         if (currentState === STATES.START && clicked && clicked.id === 'btn_start') {
             resetPools(); currentDay = 1; globalAlpha = 0; 
-            currentStage = introStage;
-            mainCharacter.setEmotion('normal');
-            currentState = STATES.STORY;
+            currentStage = introStage; mainCharacter.setEmotion('normal'); currentState = STATES.STORY;
         }
         else if (currentState === STATES.DAY_TRANSITION && clicked && clicked.id === 'screen_next_day') {
-            let dayData = daysData[currentDay - 1];
-            let role = dayData.role;
-            if (activePools[role] && activePools[role].length > 0) {
-                currentStage = activePools[role].pop();
-            } else {
-                let roleText = role === 'maid' ? '丫鬟' : role === 'chef' ? '總管' : role === 'doctor' ? '太醫' : '醫女';
-                currentStage = fallbackQuestions.find(q => q.character && q.character.includes(roleText)) || fallbackQuestions[0];
-            }
-            currentStage.location = dayData.location;
-            mainCharacter.resetAppearance();
-            currentStoryLine = 0;
-            currentState = STATES.STORY;
+            let dayData = daysData[currentDay - 1]; let role = dayData.role;
+            if (activePools[role] && activePools[role].length > 0) currentStage = activePools[role].pop();
+            else currentStage = fallbackQuestions[0]; // 極端情況防呆
+            currentStage.location = dayData.location; mainCharacter.reset(); currentStoryLine = 0; currentState = STATES.STORY;
         }
         else if (currentState === STATES.STORY && clicked && clicked.id === 'screen_next') {
-            currentStoryLine++;
-            if (currentStoryLine >= currentStage.story.length) currentState = STATES.QUESTION;
+            currentStoryLine++; if (currentStoryLine >= currentStage.story.length) currentState = STATES.QUESTION;
         }
         else if (currentState === STATES.QUESTION && clicked && clicked.id.startsWith('opt_')) {
-            let idx = parseInt(clicked.id.split('_')[1]);
-            applyChoice(currentStage.options[idx]);
+            let idx = parseInt(clicked.id.split('_')[1]); applyChoice(currentStage.options[idx]);
         }
         else if (currentState === STATES.FEEDBACK && clicked && clicked.id === 'screen_next') {
-            if (currentStage === introStage) {
-                currentState = STATES.DAY_TRANSITION;
-            } else {
+            isCinematic = false; // 解除 CG 模式
+            if (currentStage === introStage) { currentState = STATES.DAY_TRANSITION; } 
+            else {
                 currentDay++; currentStoryLine = 0;
-                if (currentDay > 7) { 
-                    currentEnding = determineEnding();
-                    globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy');
-                } else {
-                    globalAlpha = 0; currentState = STATES.DAY_TRANSITION;
-                }
+                if (currentDay > 7) { currentEnding = determineEnding(); globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy'); } 
+                else { globalAlpha = 0; currentState = STATES.DAY_TRANSITION; }
             }
         }
         else if (currentState === STATES.END && clicked && clicked.id === 'btn_restart') {
-            currentDay = 1; 
-            player.knowledge = 50; player.health = 60; player.reputation = 50; player.bond = 50;
+            currentDay = 1; player.knowledge = 50; player.health = 60; player.reputation = 50; player.bond = 50;
             player.routes = { virtue: 0, power: 0, medical: 0, family: 0 };
-            resetPools();
-            for(let key in player.affections) { player.affections[key].target = 20; player.affections[key].current = 20; player.affections[key].status = "陌生"; }
-            globalAlpha = 0; 
-            currentStage = introStage;
-            mainCharacter.setEmotion('normal');
-            currentState = STATES.STORY;
+            resetPools(); for(let key in player.affections) { player.affections[key].target = 20; player.affections[key].current = 20; player.affections[key].status = "陌生"; }
+            globalAlpha = 0; currentStage = introStage; mainCharacter.setEmotion('normal'); currentState = STATES.STORY;
         }
         else if (currentState === STATES.END && clicked && clicked.id === 'btn_home') {
             window.location.reload(); 
         }
     }
 
-    canvas.addEventListener('mousedown', e => {
-        mouse.isDown = true;
-    });
-    canvas.addEventListener('mouseup', e => {
-        mouse.isDown = false;
-        if (currentState !== STATES.LOADING) {
-            let rect = canvas.getBoundingClientRect();
-            handleInteraction((e.clientX - rect.left) * (cw / rect.width), (e.clientY - rect.top) * (ch / rect.height));
-        }
-    });
-    
-    canvas.addEventListener('touchstart', e => { 
-        e.preventDefault(); 
-        mouse.isDown = true;
-        let rect = canvas.getBoundingClientRect();
-        let cx = (e.touches[0].clientX - rect.left) * (cw / rect.width);
-        let cy = (e.touches[0].clientY - rect.top) * (ch / rect.height);
-        mouse.targetX = cx; mouse.targetY = cy;
-    }, {passive: false});
-    canvas.addEventListener('touchend', e => {
-        mouse.isDown = false;
-        if (currentState !== STATES.LOADING) {
-            handleInteraction(mouse.targetX, mouse.targetY);
-        }
-    });
+    canvas.addEventListener('mousedown', e => { mouse.isDown = true; });
+    canvas.addEventListener('mouseup', e => { mouse.isDown = false; if (currentState !== STATES.LOADING) handleInteraction((e.clientX - canvas.getBoundingClientRect().left) * (cw / canvas.getBoundingClientRect().width), (e.clientY - canvas.getBoundingClientRect().top) * (ch / canvas.getBoundingClientRect().height)); });
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); mouse.isDown = true; let rect = canvas.getBoundingClientRect(); mouse.targetX = (e.touches[0].clientX - rect.left) * (cw / rect.width); mouse.targetY = (e.touches[0].clientY - rect.top) * (ch / rect.height); }, {passive: false});
+    canvas.addEventListener('touchend', e => { mouse.isDown = false; if (currentState !== STATES.LOADING) handleInteraction(mouse.targetX, mouse.targetY); });
 
-    loadQuestions();
-    requestAnimationFrame(gameLoop);
-
+    loadQuestions(); requestAnimationFrame(gameLoop);
 </script>
 </body>
 </html>
