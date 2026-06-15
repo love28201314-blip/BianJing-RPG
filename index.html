@@ -142,9 +142,10 @@
     window.addEventListener('resize', resize); resize();
 
     // =============== 變數宣告與初始化修復區塊 ===============
-    const STATES = { LOADING: 0, TITLE: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6, SYSTEM: 7 };
+    const STATES = { LOADING: 0, TITLE: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6, SYSTEM: 7, MODE_SELECT: 8 };
     let currentState = STATES.LOADING; 
     
+    let gameMode = "tutorial"; // "tutorial" = 七日衛教體驗, "free" = 自由探索模式
     let currentDay = 1; let currentStage = null; let currentStoryLine = 0;
     let selectedOptionFeedback = "";
     let mouse = { x: cw/2, y: ch/2, targetX: cw/2, targetY: ch/2, isDown: false };
@@ -893,7 +894,7 @@
 
         ctx.save(); ctx.scale(dpr, dpr); ctx.translate(cameraShake.x, cameraShake.y);
 
-        if ([STATES.DAY_TRANSITION, STATES.TITLE, STATES.END, STATES.LOADING].includes(currentState)) globalAlpha += (1 - globalAlpha) * dt * 2;
+        if ([STATES.DAY_TRANSITION, STATES.TITLE, STATES.END, STATES.LOADING, STATES.MODE_SELECT].includes(currentState)) globalAlpha += (1 - globalAlpha) * dt * 2;
         else globalAlpha = 1;
         if (isNaN(globalAlpha)) globalAlpha = 1; ctx.globalAlpha = globalAlpha;
 
@@ -938,12 +939,23 @@
         else if (currentState === STATES.DAY_TRANSITION) {
             ctx.fillStyle = 'rgba(10,10,12,0.8)'; ctx.fillRect(0,0,cw,ch);
             let dayInfo = daysData[Math.min(currentDay - 1, daysData.length - 1)];
+            let titleText = gameMode === "free" ? `自由探索 第 ${currentDay} 天` : dayInfo.day;
+            let eventText = gameMode === "free" ? "侯府的日常依舊。今日您打算繼續在府內巡視，與眾人交流並處理大小事務。" : dayInfo.event;
+            
             ctx.textAlign = 'center'; ctx.shadowColor = '#d4af37'; ctx.shadowBlur = 15;
-            ctx.fillStyle = '#d4af37'; ctx.font = `bold 52px ${FONT_FAMILY}`; ctx.fillText(dayInfo.day, cw/2, ch/2 - 80); ctx.shadowBlur = 0;
+            ctx.fillStyle = '#d4af37'; ctx.font = `bold 52px ${FONT_FAMILY}`; ctx.fillText(titleText, cw/2, ch/2 - 80); ctx.shadowBlur = 0;
             ctx.fillStyle = '#f0ebd8'; ctx.font = `24px ${FONT_FAMILY}`;
-            let lines = wrapText(ctx, dayInfo.event, Math.min(650, cw - 60)); lines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 10 + i*36));
+            let lines = wrapText(ctx, eventText, Math.min(650, cw - 60)); lines.forEach((l, i) => ctx.fillText(l, cw/2, ch/2 - 10 + i*36));
             ctx.globalAlpha = (Math.sin(time * 3) + 1) * 0.5 * globalAlpha; ctx.fillStyle = '#d4af37'; ctx.font = `bold 20px ${FONT_FAMILY}`; ctx.fillText("◇ 點擊開啟今日篇章 ◇", cw/2, ch/2 + 150); ctx.globalAlpha = globalAlpha;
             clickZones.push({ id: 'screen_next_day', x: 0, y: 0, w: cw, h: ch });
+        }
+        else if (currentState === STATES.MODE_SELECT) {
+            drawDatePanel(ctx); drawStatsPanel(ctx);
+            let options = [
+                { text: "【結束體驗】進行最終結算，觀看您的主母結局。" },
+                { text: "【繼續探索】進入自由模式，無天數限制繼續遊玩。" }
+            ];
+            renderDialog(ctx, "七日衛教體驗完成", "您已成功度過了最艱難的產後初期。接下來，您打算...", options);
         }
         else if (currentState === STATES.STORY) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, currentStage.character, currentStage.story[currentStoryLine], null); }
         else if (currentState === STATES.QUESTION) { drawDatePanel(ctx); drawStatsPanel(ctx); renderDialog(ctx, currentStage.character || "內心抉擇", currentStage.question, currentStage.options); }
@@ -968,13 +980,27 @@
         let clicked = clickZones.find(z => cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h);
         
         if (currentState === STATES.TITLE && clicked && clicked.id === 'btn_start') {
-            currentDay = 1; globalAlpha = 0; currentStage = introStage; mainCharacter.setEmotion('normal'); currentState = STATES.STORY;
+            currentDay = 1; gameMode = "tutorial"; globalAlpha = 0; currentStage = introStage; mainCharacter.setEmotion('normal'); currentState = STATES.STORY;
         }
         else if (currentState === STATES.DAY_TRANSITION && clicked && clicked.id === 'screen_next_day') {
-            let role = daysData[currentDay - 1].role;
-            currentStage = (activePools[role] && activePools[role].length > 0) ? activePools[role].pop() : fallbackQuestions[0];
-            currentStage.location = daysData[currentDay - 1].location;
-            mainCharacter.resetAppearance(); currentStoryLine = 0; currentState = STATES.STORY;
+            let role, location;
+            if (gameMode === "free") {
+                let roles = ['maid', 'chef', 'doctor', 'medic'];
+                let locations = ['侯府臥房', '廚房', '太醫院', '庭院'];
+                let rIdx = Math.floor(Math.random() * roles.length);
+                role = roles[rIdx];
+                location = locations[rIdx];
+            } else {
+                role = daysData[currentDay - 1].role;
+                location = daysData[currentDay - 1].location;
+            }
+            
+            if (!activePools[role] || activePools[role].length === 0) resetPools(); // 題庫抽空時補充
+            
+            currentStage = activePools[role].pop();
+            currentStage.location = location;
+            if(mainCharacter.resetAppearance) mainCharacter.resetAppearance(); else if(mainCharacter.reset) mainCharacter.reset();
+            currentStoryLine = 0; currentState = STATES.STORY;
         }
         else if (currentState === STATES.STORY && clicked && clicked.id === 'screen_next') {
             currentStoryLine++; if (currentStoryLine >= currentStage.story.length) currentState = STATES.QUESTION;
@@ -986,13 +1012,25 @@
             if (currentStage === introStage) { currentState = STATES.DAY_TRANSITION; } 
             else {
                 currentDay++; currentStoryLine = 0;
-                if (currentDay > 7) { currentEnding = determineEnding(); globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy'); } 
+                if (currentDay > 7 && gameMode === "tutorial") { 
+                    globalAlpha = 0; currentState = STATES.MODE_SELECT; mainCharacter.setEmotion('normal'); 
+                } 
                 else { globalAlpha = 0; currentState = STATES.DAY_TRANSITION; }
+            }
+        }
+        else if (currentState === STATES.MODE_SELECT && clicked && clicked.id.startsWith('opt_')) {
+            let idx = parseInt(clicked.id.split('_')[1]);
+            if (idx === 0) {
+                // 結束體驗
+                currentEnding = determineEnding(); globalAlpha = 0; currentState = STATES.END; mainCharacter.setEmotion('happy');
+            } else {
+                // 繼續探索
+                gameMode = "free"; globalAlpha = 0; currentState = STATES.DAY_TRANSITION;
             }
         }
         else if (currentState === STATES.END && clicked) {
             if (clicked.id === 'btn_restart') {
-                currentDay = 1; player.knowledge = 50; player.health = 60; player.reputation = 50; player.bond = 50;
+                currentDay = 1; gameMode = "tutorial"; player.knowledge = 50; player.health = 60; player.reputation = 50; player.bond = 50;
                 player.routes = { virtue: 0, power: 0, medical: 0, family: 0 }; resetPools();
                 for(let key in player.affections) { player.affections[key].target = 20; player.affections[key].current = 20; player.affections[key].status = "陌生"; }
                 if(globalData.playCount > 0) { player.knowledge+=10; player.reputation+=10; }
