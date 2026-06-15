@@ -141,7 +141,7 @@
     }
     window.addEventListener('resize', resize); resize();
 
-    // 狀態機升級
+    // =============== 變數宣告與初始化修復區塊 ===============
     const STATES = { LOADING: 0, TITLE: 1, DAY_TRANSITION: 2, STORY: 3, QUESTION: 4, FEEDBACK: 5, END: 6, SYSTEM: 7 };
     let currentState = STATES.LOADING; 
     
@@ -152,6 +152,9 @@
     let clickZones = []; 
     let cameraShake = { x: 0, y: 0, amount: 0 };
     let globalAlpha = 1; 
+    let currentEnding = null; // 結局資料變數
+    let bloomIntensity = 0; // 光暈強度變數
+    let bloomColor = '212,175,55'; // 光暈顏色變數
 
     let player = { 
         knowledge: 50, health: 60, reputation: 50, bond: 50, 
@@ -163,6 +166,41 @@
             medic: { name: "醫女 蘇氏", current: 20, target: 20, max: 100, color: "#82c0d9", status: "陌生" }
         }
     };
+
+    // --- 1. 加入洗牌演算法 (Fisher-Yates Shuffle) ---
+    function shuffle(array) {
+        let currentIndex = array.length, randomIndex, temp;
+        while (currentIndex !== 0) {
+            randomIndex = Math.floor(Math.random() * currentIndex);
+            currentIndex--;
+            temp = array[currentIndex];
+            array[currentIndex] = array[randomIndex];
+            array[randomIndex] = temp;
+        }
+        return array;
+    }
+
+    // --- 2. 宣告並初始化粒子系統 (DustParticle) ---
+    class DustParticle {
+        constructor() {
+            this.x = Math.random() * cw; this.y = Math.random() * ch;
+            this.size = Math.random() * 2 + 0.5;
+            this.vx = (Math.random() - 0.5) * 0.5; this.vy = (Math.random() - 0.5) * 0.5 - 0.2;
+            this.life = Math.random() * Math.PI * 2;
+        }
+        update(dt) {
+            this.x += this.vx + Math.sin(time + this.life) * 0.5; this.y += this.vy; this.life += dt;
+            if (this.y < 0) this.y = ch; if (this.x < 0) this.x = cw; if (this.x > cw) this.x = 0;
+        }
+        draw(ctx) {
+            let alpha = (Math.sin(this.life * 2) + 1) * 0.3;
+            ctx.fillStyle = `rgba(212, 175, 55, ${alpha * 0.5})`; // 金色粒子
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
+        }
+    }
+    let dustParticles = [];
+    for (let i = 0; i < 40; i++) dustParticles.push(new DustParticle());
+    // =========================================================
 
     // 全局資料 (成就、解鎖結局、多周目次數)
     let globalData = {
@@ -180,7 +218,7 @@
         try {
             const saved = localStorage.getItem('bianjing_global');
             if (saved) {
-                const parsed = JSON.json(saved);
+                const parsed = JSON.parse(saved); // 修復錯字 JSON.json -> JSON.parse
                 globalData.playCount = parsed.playCount || 0;
                 globalData.unlockedEndings = parsed.unlockedEndings || [];
                 if(parsed.achievements) Object.assign(globalData.achievements, parsed.achievements);
@@ -190,7 +228,6 @@
     function saveGlobalData() { localStorage.setItem('bianjing_global', JSON.stringify(globalData)); }
 
     function showSysMessage(msg) {
-        // 簡易的 Canvas 浮動提示
         selectedOptionFeedback = msg;
         let prev = currentState; currentState = STATES.FEEDBACK;
         setTimeout(() => { if(currentState === STATES.FEEDBACK) currentState = prev; }, 1500);
@@ -285,7 +322,6 @@
         { day: "產後第七天", weather: "sunny", location: "庭院", role: "medic", event: "轉眼已至第七日，您逐漸適應了母親的身份。今日的總結，將決定您在侯府的最終地位。" }
     ];
 
-    // 內建題庫 (支援隱藏條件 condition)
     const fallbackQuestions = [
          {
             "category": "產後身心", "character": "丫鬟 春桃",
@@ -356,7 +392,6 @@
         } catch (error) { console.warn("使用內建備用題庫。"); externalQuestions = fallbackQuestions.slice(); } 
         finally {
             resetPools(); 
-            // NG+ 初始加成
             if(globalData.playCount > 0) { player.knowledge += 10; player.reputation += 10; }
             currentState = STATES.TITLE; 
         }
@@ -419,7 +454,6 @@
             this.targetExpr = { smile: 0, brow: 0, eye: 1.0 }; this.currExpr = { smile: 0, brow: 0, eye: 1.0 };
             this.scale = 0; this.y = 100;
             
-            // 升級古典配色 (天水碧、胭脂、秋香)
             this.colors = customColors || {
                 skinBase: '#fae3d9', skinShadow: '#d9a896', skinHigh: '#fff1ec',
                 hairDark: '#0a0b10', hairLight: '#2c2f3f',
@@ -636,23 +670,20 @@
         }
         if (hasPos) { bloomIntensity = 1.0; bloomColor = '212,175,55'; } 
         if (hasNeg) { cameraShake.amount = 12; bloomIntensity = 0.5; bloomColor = '139,30,40'; }
-        checkAchievements(); // 每次更動屬性後檢查成就
+        checkAchievements(); 
     }
 
     function applyChoice(opt) { mainCharacter.setEmotion(opt.expr || 'normal'); selectedOptionFeedback = opt.feedback; applyEffects(opt.effects); currentState = STATES.FEEDBACK; }
 
     function drawPaperPanel(ctx, x, y, w, h) {
         ctx.save();
-        // 古典紙紋底
         ctx.fillStyle = 'rgba(25, 20, 18, 0.95)'; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 20;
         ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill(); ctx.shadowBlur = 0;
         
-        // 內外金邊
         let bGrad = ctx.createLinearGradient(x, y, x, y+h); bGrad.addColorStop(0, '#d4af37'); bGrad.addColorStop(1, '#8a6620');
         ctx.strokeStyle = bGrad; ctx.lineWidth = 2; ctx.stroke();
         ctx.strokeStyle = 'rgba(212, 175, 55, 0.3)'; ctx.beginPath(); ctx.roundRect(x+4, y+4, w-8, h-8, 5); ctx.stroke();
         
-        // 金屬護角
         ctx.fillStyle = '#aa8620';
         const cl = 15; const ct = 3;
         ctx.fillRect(x+4, y+4, cl, ct); ctx.fillRect(x+4, y+4, ct, cl);
@@ -741,7 +772,6 @@
 
         ctx.save(); ctx.translate(btn.x + btn.w/2, btn.y + btn.h/2); ctx.scale(scale, scale);
         
-        // 古風漸層按鈕
         let bg = ctx.createLinearGradient(0, -btn.h/2, 0, btn.h/2);
         if (isLocked) { bg.addColorStop(0, 'rgba(40, 40, 40, 0.9)'); bg.addColorStop(1, 'rgba(20, 20, 20, 0.9)'); }
         else if (hover) { bg.addColorStop(0, 'rgba(212, 175, 55, 0.5)'); bg.addColorStop(1, 'rgba(139, 30, 40, 0.4)'); ctx.shadowColor = 'rgba(212, 175, 55, 0.5)'; ctx.shadowBlur = 10; } 
@@ -822,18 +852,18 @@
         let grad = ctx.createLinearGradient(0, 0, 0, ch);
         
         if (loc.includes('正房') || loc.includes('臥房')) {
-            grad.addColorStop(0, '#2a1215'); grad.addColorStop(1, '#110608'); // 胭脂暗紅
+            grad.addColorStop(0, '#2a1215'); grad.addColorStop(1, '#110608'); 
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
             ctx.fillStyle = 'rgba(212, 175, 55, 0.02)'; ctx.fillRect(cw*0.05, ch*0.1, cw*0.25, ch*0.8); ctx.fillRect(cw*0.7, ch*0.1, cw*0.25, ch*0.8);
             ctx.strokeStyle = 'rgba(212, 175, 55, 0.05)'; ctx.lineWidth = 2;
             for(let i=0; i<10; i++) { ctx.strokeRect(cw*0.05, ch*0.1 + i*ch*0.08, cw*0.25, ch*0.08); ctx.strokeRect(cw*0.7, ch*0.1 + i*ch*0.08, cw*0.25, ch*0.08); }
         } else if (loc.includes('庭院') || loc.includes('花園')) {
-            grad.addColorStop(0, '#0f1a20'); grad.addColorStop(1, '#050a0f'); // 天水碧暗色
+            grad.addColorStop(0, '#0f1a20'); grad.addColorStop(1, '#050a0f'); 
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
             ctx.fillStyle = 'rgba(212, 230, 255, 0.15)'; ctx.beginPath(); ctx.arc(cw*0.8, ch*0.2, Math.min(cw,ch)*0.15, 0, Math.PI*2); ctx.fill();
             ctx.fillStyle = '#05080a'; ctx.beginPath(); ctx.moveTo(0, ch); ctx.lineTo(0, ch*0.5); ctx.quadraticCurveTo(cw*0.3, ch*0.3, cw*0.6, ch*0.8); ctx.lineTo(cw, ch); ctx.fill();
         } else if (loc.includes('廚房') || loc.includes('膳房')) {
-            grad.addColorStop(0, '#26160d'); grad.addColorStop(1, '#120a05'); // 秋香暗褐
+            grad.addColorStop(0, '#26160d'); grad.addColorStop(1, '#120a05'); 
             ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
             let fire = ctx.createRadialGradient(cw/2, ch, 0, cw/2, ch, ch*0.9); fire.addColorStop(0, 'rgba(200, 80, 20, 0.2)'); fire.addColorStop(1, 'rgba(0,0,0,0)');
             ctx.fillStyle = fire; ctx.fillRect(0, 0, cw, ch);
@@ -890,7 +920,6 @@
 
         clickZones = []; canvas.style.cursor = 'crosshair'; 
 
-        // 判定是否顯示系統選單按鈕
         const sysBtn = document.getElementById('btn-sys-toggle');
         if([STATES.TITLE, STATES.DAY_TRANSITION, STATES.STORY, STATES.QUESTION, STATES.FEEDBACK].includes(currentState)) {
             sysBtn.style.display = 'block';
@@ -934,7 +963,7 @@
     }
 
     function handleInteraction(cx, cy) {
-        if(document.getElementById('sys-menu').style.display === 'flex') return; // 選單開啟時封鎖 Canvas 點擊
+        if(document.getElementById('sys-menu').style.display === 'flex') return;
         
         let clicked = clickZones.find(z => cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h);
         
